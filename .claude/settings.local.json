@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where claude *)",
+      "Bash(where node *)",
+      "Bash(where npm *)",
+      "Bash(npm --version)",
+      "PowerShell(Get-Command node -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command npm -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command claude -ErrorAction SilentlyContinue)",
+      "PowerShell(irm https://claude.ai/install.ps1 | iex)",
+      "Bash(powershell.exe -NoProfile -Command \"Write-Output hello\")",
+      "Bash(powershell.exe -NoProfile -Command \"irm https://claude.ai/install.ps1 | iex\")",
+      "Bash(powershell.exe -NoProfile -Command \"[Environment]::GetEnvironmentVariable\\('Path','User'\\)\")",
+      "Bash(powershell.exe -NoProfile -Command '$old = [Environment]::GetEnvironmentVariable\\('\\\\''Path'\\\\'','\\\\''User'\\\\''\\); $new = $old.TrimEnd\\('\\\\'';'\\\\''\\) + '\\\\'';C:\\\\Users\\\\Ernik\\\\.local\\\\bin'\\\\''; [Environment]::SetEnvironmentVariable\\('\\\\''Path'\\\\'', $new, '\\\\''User'\\\\''\\); Write-Output $new')",
+      "Bash(powershell.exe -NoProfile -Command '$env:Path = [Environment]::GetEnvironmentVariable\\('\\\\''Path'\\\\'','\\\\''User'\\\\''\\) + '\\\\'';'\\\\'' + [Environment]::GetEnvironmentVariable\\('\\\\''Path'\\\\'','\\\\''Machine'\\\\''\\); claude --version')",
+      "WebFetch(domain:doc-0o-c0-sheets.googleusercontent.com)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://docs.google.com/spreadsheets/d/1Gf6cM9_e-o9XaYVOacIZoXx-fzz-fl2WwTDnSApIs58/export?format=csv&gid=0\" -UseBasicParsing; $r.Content | Out-File -Encoding utf8 \"$env:TEMP\\\\sheet0.csv\"; \"OK $\\($r.Content.Length\\)\" } catch { \"ERR: $_\" })",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(node --no-warnings=ExperimentalWarning --experimental-strip-types --test src/**/*.test.ts)"
+    ]
+  }
+}

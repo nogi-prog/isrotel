@@ -1,0 +1,20 @@
+node_modules/
+dist/
+data/
+*.db
+# מסד הדמו נשמר ב־repo כדי שהפריסה (ללא אחסון קבוע) תעלה עם נתונים.
+!server/seed/trip-organize.seed.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.local
+.DS_Store
+*.log
+
+# Vite cache
+node_modules/.vite/
+.vercel
+
+# Claude Code worktrees (stale local working copies, not project content)
+.claude/worktrees/

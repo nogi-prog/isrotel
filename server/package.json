@@ -1,0 +1,27 @@
+{
+  "name": "@trip-organize/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --no-warnings=ExperimentalWarning --watch --experimental-strip-types src/main.ts",
+    "build": "tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "start": "node --no-warnings=ExperimentalWarning dist/main.js",
+    "seed": "node --no-warnings=ExperimentalWarning --experimental-strip-types src/db/seed.ts",
+    "reset": "node --no-warnings=ExperimentalWarning --experimental-strip-types src/db/seed.ts --reset",
+    "test": "node --no-warnings=ExperimentalWarning --experimental-strip-types --test 'src/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

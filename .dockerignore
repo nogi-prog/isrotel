@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+.git
+.claude
+server/data
+server/dist
+web/dist
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+.env
+.env.local
+.vercel
+fly.toml
