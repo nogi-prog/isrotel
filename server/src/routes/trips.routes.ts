@@ -39,26 +39,32 @@ const dateSchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'תאריך חייב להיות בתבנית YYYY-MM-DD');
 
 /**
- * פעימת יציאה: תאריך יציאה בלבד. הפעימה היא גל של יום אחד, ואין תאריך חזרה.
- * השם נגזר מסדר היציאה (חלוץ, פעימה 1, ...) ולכן אינו נשלח מהטופס.
+ * פעימת יציאה: תאריך יציאה, ושם (לא חובה - כברירת מחדל נגזר מסדר היציאה:
+ * חלוץ, פעימה 1, ...). שם מפורש מסמן את הפעימה כ-custom_name, ראו renumberCycles.
  */
 const cycleSchema = z.object({
   exitDate: dateSchema,
+  name: z.string().trim().min(1).max(60).optional(),
 });
 
 /**
- * יצירת גלישה: האופרטיבי בוחר שם (לא חובה - "גלישה #N" אוטומטי אם נשאר ריק),
- * את המפקדים שקיבלו את משימת שיבוץ האנשים, ואת פעימות היציאה. אין יעד או
- * תיאור. תאריך הפרסום הוא רגע הלחיצה על הכפתור - לא שדה שממלאים.
+ * עריכת פעימה קיימת - אותם שדות, שניהם אופציונליים (רק מה שהאופרטיבי שינה).
+ */
+const cyclePatchSchema = cycleSchema.partial();
+
+/**
+ * יצירת גלישה: האופרטיבי בוחר שם (חובה), את המפקדים שקיבלו את משימת שיבוץ
+ * האנשים, ואת פעימות היציאה. אין יעד או תיאור. תאריך הפרסום הוא רגע הלחיצה
+ * על הכפתור - לא שדה שממלאים.
  */
 const tripSchema = z.object({
-  name: z.string().trim().max(80).optional(),
+  name: z.string().trim().min(1, 'יש להזין שם לגלישה').max(80),
   leaderIds: z.array(z.number().int().positive()).min(1, 'יש לבחור לפחות מפקד אחד שישבץ אנשים'),
   cycles: z.array(cycleSchema).min(1, 'יש להגדיר לפחות פעימה אחת - החלוץ'),
 });
 
-/** מספר המשתתפים לפי מצב ההרשמה, לכל פעימה. */
-function cycleCounts(tripId: number): Map<number, { approved: number; pending: number }> {
+/** מספר המשתתפים לפי מצב ההרשמה, לכל פעימה - כולל כמה מהמאושרים כבר אושרו גם על ידי האופרטיבי. */
+function cycleCounts(tripId: number): Map<number, { approved: number; pending: number; toApproved: number }> {
   const rows = db
     .prepare(
       `SELECT cycle_id, status, COUNT(*) AS count
@@ -68,11 +74,25 @@ function cycleCounts(tripId: number): Map<number, { approved: number; pending: n
     )
     .all(tripId) as Array<{ cycle_id: number; status: string; count: number }>;
 
-  const result = new Map<number, { approved: number; pending: number }>();
+  const toApprovedRows = db
+    .prepare(
+      `SELECT cycle_id, COUNT(*) AS count
+         FROM signups
+        WHERE trip_id = ? AND status = 'approved' AND to_approved_at IS NOT NULL
+        GROUP BY cycle_id`,
+    )
+    .all(tripId) as Array<{ cycle_id: number; count: number }>;
+
+  const result = new Map<number, { approved: number; pending: number; toApproved: number }>();
   for (const row of rows) {
-    const entry = result.get(row.cycle_id) ?? { approved: 0, pending: 0 };
+    const entry = result.get(row.cycle_id) ?? { approved: 0, pending: 0, toApproved: 0 };
     if (row.status === 'approved') entry.approved = row.count;
     else entry.pending = row.count;
+    result.set(row.cycle_id, entry);
+  }
+  for (const row of toApprovedRows) {
+    const entry = result.get(row.cycle_id) ?? { approved: 0, pending: 0, toApproved: 0 };
+    entry.toApproved = row.count;
     result.set(row.cycle_id, entry);
   }
   return result;
@@ -87,8 +107,10 @@ function serializeTrip(trip: TripRow, userId: number) {
     id: cycle.id,
     name: cycle.name,
     exitDate: cycle.exit_date,
+    customName: cycle.custom_name === 1,
     approvedCount: counts.get(cycle.id)?.approved ?? 0,
     pendingCount: counts.get(cycle.id)?.pending ?? 0,
+    toApprovedCount: counts.get(cycle.id)?.toApproved ?? 0,
   }));
 
   const user = getUser(db, userId);
@@ -222,8 +244,8 @@ tripsRouter.get('/:id', (req, res) => {
 /**
  * יצירת גלישה חדשה - אופרטיבי בלבד.
  * הגלישה נכנסת מיד למצב LAUNCHED, המצב הראשון במכונת המצבים.
- * השם נוצר אוטומטית לפי המזהה: "גלישה #1", "גלישה #2" וכן הלאה, ושמות
- * הפעימות נגזרים מסדר היציאה: "חלוץ", "פעימה 1" וכן הלאה.
+ * שם הגלישה חובה. שמות הפעימות נגזרים כברירת מחדל מסדר היציאה: "חלוץ",
+ * "פעימה 1" וכן הלאה - אלא אם הוזן שם מפורש לפעימה (custom_name).
  */
 tripsRouter.post('/', requireTO, (req, res) => {
   const user = requireUser(req);
@@ -246,23 +268,20 @@ tripsRouter.post('/', requireTO, (req, res) => {
       db
         .prepare(
           `INSERT INTO trips (name, launch_date, bus_capacity, created_by, state)
-           VALUES ('', date('now'), ?, ?, 'LAUNCHED') RETURNING *`,
+           VALUES (?, date('now'), ?, ?, 'LAUNCHED') RETURNING *`,
         )
-        .get(DEFAULT_BUS_CAPACITY, user.id),
+        .get(input.name, DEFAULT_BUS_CAPACITY, user.id),
     );
-
-    const name = input.name || `גלישה #${created.id}`;
-    db.prepare('UPDATE trips SET name = ? WHERE id = ?').run(name, created.id);
 
     const assign = db.prepare('INSERT INTO trip_leaders (trip_id, manager_id) VALUES (?, ?)');
     for (const leader of leaders) assign.run(created.id, leader.id);
 
-    // השמות נכתבים ריקים ומחושבים ב-renumberCycles לפי סדר היציאה.
-    const insertCycle = db.prepare('INSERT INTO cycles (trip_id, name, exit_date) VALUES (?, ?, ?)');
-    for (const cycle of input.cycles) insertCycle.run(created.id, '', cycle.exitDate);
+    // שם ריק (לא הוזן) מחושב ב-renumberCycles לפי סדר היציאה; שם מפורש מסומן custom_name.
+    const insertCycle = db.prepare('INSERT INTO cycles (trip_id, name, exit_date, custom_name) VALUES (?, ?, ?, ?)');
+    for (const cycle of input.cycles) insertCycle.run(created.id, cycle.name ?? '', cycle.exitDate, cycle.name ? 1 : 0);
     renumberCycles(created.id);
 
-    return { ...created, name };
+    return created;
   });
 
   res.status(201).json({ trip: serializeTrip(trip, user.id) });
@@ -469,8 +488,10 @@ tripsRouter.delete('/:id', requireTO, (req, res) => {
 });
 
 // --- פעימות יציאה ---------------------------------------------------------
-// השמות נגזרים מסדר היציאה ולא מוזנים: הפעימה הראשונה היא "חלוץ" ואחריה
-// "פעימה 1" וכן הלאה. לכן כל שינוי בסדר או בהרכב מחייב מספור מחדש.
+// השם כברירת מחדל נגזר מסדר היציאה: הפעימה הראשונה היא "חלוץ" ואחריה
+// "פעימה 1" וכן הלאה - אלא אם האופרטיבי בחר שם משלו (custom_name). ניתן
+// להוסיף, לערוך ולמחוק פעימות בכל שלב - גם אחרי שמפקדים כבר שיבצו אנשים,
+// וגם אחרי שהגלישה הוגשה (אין בדיקת מצב/הגשה כאן בכוונה).
 
 tripsRouter.post('/:id/cycles', requireTO, (req, res) => {
   const user = requireUser(req);
@@ -480,7 +501,12 @@ tripsRouter.post('/:id/cycles', requireTO, (req, res) => {
   const input = parsed.data;
 
   tx(() => {
-    db.prepare('INSERT INTO cycles (trip_id, name, exit_date) VALUES (?, ?, ?)').run(trip.id, '', input.exitDate);
+    db.prepare('INSERT INTO cycles (trip_id, name, exit_date, custom_name) VALUES (?, ?, ?, ?)').run(
+      trip.id,
+      input.name ?? '',
+      input.exitDate,
+      input.name ? 1 : 0,
+    );
     renumberCycles(trip.id);
   });
 
@@ -491,15 +517,24 @@ tripsRouter.patch('/:id/cycles/:cycleId', requireTO, (req, res) => {
   const user = requireUser(req);
   const trip = getTripOr404(idParam.parse(req.params.id));
   const cycle = getCycleOr404(trip.id, idParam.parse(req.params.cycleId));
-  const parsed = cycleSchema.partial().safeParse(req.body);
+  const parsed = cyclePatchSchema.safeParse(req.body);
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? 'נתוני הפעימה אינם תקינים');
   const input = parsed.data;
 
   const exitDate = input.exitDate ?? cycle.exit_date;
+  // שם מפורש (גם אם הוקלד מחדש) מסמן את הפעימה כ-custom - היא לא תשתנה
+  // אוטומטית יותר גם אם סדר היציאה יזוז.
+  const name = input.name ?? cycle.name;
+  const customName = input.name != null ? 1 : cycle.custom_name;
 
   tx(() => {
-    db.prepare('UPDATE cycles SET exit_date = ? WHERE id = ?').run(exitDate, cycle.id);
-    // שינוי תאריך יכול להזיז את הפעימה בסדר היציאה, ולכן גם את השמות.
+    db.prepare('UPDATE cycles SET exit_date = ?, name = ?, custom_name = ? WHERE id = ?').run(
+      exitDate,
+      name,
+      customName,
+      cycle.id,
+    );
+    // שינוי תאריך יכול להזיז את הפעימה בסדר היציאה, ולכן גם את שמות הפעימות שאינן custom.
     renumberCycles(trip.id);
   });
 

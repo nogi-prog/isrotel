@@ -14,6 +14,8 @@
   --accent-soft: #dceafd;
   --danger: #a3312c;
   --danger-soft: #fbe9e8;
+  --success: #1c7a3d;
+  --success-soft: #e2f5e8;
   --warning: #8a5a12;
   --warning-soft: #fdf1dc;
   --info: #0e7490;
@@ -40,6 +42,8 @@
     --accent-soft: #16294a;
     --danger: #f08a84;
     --danger-soft: #3a2422;
+    --success: #6bcf8f;
+    --success-soft: #1c3324;
     --warning: #e0b169;
     --warning-soft: #362c1c;
     --info: #7dd3fc;
@@ -71,6 +75,13 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* קישורים (a[href], כולל Link/NavLink) מקבלים סמן יד גם מעל הטקסט עצמו -
+   בלי זה חלק מהדפדפנים מציגים סמן טקסט (I-beam) כשמרחפים בדיוק מעל האותיות
+   של קישור, למרות שהוא לחיץ. */
+a[href] {
+  cursor: pointer;
 }
 
 body {
@@ -268,11 +279,63 @@ a {
 }
 
 .topbar__icon-btn {
+  position: relative;
   width: 2.1rem;
   height: 2.1rem;
   padding: 0;
   font-size: 1.05rem;
   border-radius: 999px;
+}
+
+/* מספר ההתראות שלא נקראו, מוצג כתגית קטנה בפינת פעמון ההתראות. */
+.topbar__icon-badge {
+  position: absolute;
+  top: -2px;
+  inset-inline-end: -2px;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: 2px solid var(--surface);
+}
+
+/* בועת הפרופיל בסרגל - ראשי תיבות של השם, קישור ל-/profile. */
+.topbar__avatar {
+  width: 2.1rem;
+  height: 2.1rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.82rem;
+  text-decoration: none;
+  border: 2px solid var(--accent-strong);
+}
+
+.topbar__avatar:hover {
+  opacity: 0.85;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .topbar__avatar {
+    color: #10201a;
+  }
+}
+
+:root[data-theme='dark'] .topbar__avatar {
+  color: #10201a;
 }
 
 .topbar__contact {
@@ -463,6 +526,16 @@ a {
   background: var(--danger-soft);
 }
 
+.btn--success {
+  color: var(--success);
+  border-color: var(--success);
+  background: transparent;
+}
+
+.btn--success:hover:not(:disabled) {
+  background: var(--success-soft);
+}
+
 .btn--ghost {
   border-color: transparent;
   background: transparent;
@@ -551,6 +624,13 @@ textarea {
 
 .field-row--end > .btn {
   justify-self: start;
+}
+
+/* זוג שדות שצריכים להישאר על אותה שורה תמיד (למשל תאריך יציאה + שם פעימה) -
+   סף רוחב נמוך יותר מברירת המחדל של field-row, כדי ששני שדות קומפקטיים לא
+   ייפלו לשורה נפרדת אלא ברוחב צר מאוד באמת. */
+.field-row--pair {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
 }
 
 .checkbox {
@@ -1207,6 +1287,52 @@ tfoot td {
 
 /* --- בחירה עם חיפוש חופשי (combobox) --------------------------------- */
 
+/* --- שדה תאריך (DateField) ------------------------------------------------ */
+/* input[type=date] מוסתר שנפתח דרך showPicker(), מעליו טקסט תצוגה קבוע
+   בפורמט dd/mm/yyyy - ראו ההסבר ב-DateField.tsx. */
+
+.date-field {
+  position: relative;
+  display: flex;
+}
+
+.date-field__display {
+  padding-inline-end: 2.4rem;
+  cursor: pointer;
+}
+
+.date-field__btn {
+  position: absolute;
+  inset-inline-end: 0.3rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.date-field__btn:hover {
+  background: var(--surface-2);
+}
+
+.date-field__native {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: none;
+  padding: 0;
+}
+
 .combo {
   position: relative;
 }
@@ -1375,7 +1501,8 @@ tfoot td {
     min-height: 44px;
   }
 
-  .topbar__icon-btn {
+  .topbar__icon-btn,
+  .topbar__avatar {
     width: 44px;
     height: 44px;
   }

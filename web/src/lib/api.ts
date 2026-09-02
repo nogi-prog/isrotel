@@ -202,8 +202,12 @@ export interface TripCycle {
   id: number;
   name: string;
   exitDate: string;
+  /** האופרטיבי בחר לפעימה הזאת שם משלו - הוא לא ישתנה אוטומטית בסידור מחדש. */
+  customName: boolean;
   approvedCount: number;
   pendingCount: number;
+  /** מתוך approvedCount - כמה כבר אושרו גם על ידי האופרטיבי (ראו signups.to_approved_at). */
+  toApprovedCount: number;
 }
 
 export type TripState = 'LAUNCHED' | 'CLOSED';
@@ -693,7 +697,10 @@ export interface ParticipantsResponse {
     cycleName: string;
     exitDate: string;
     totalApproved: number;
+    /** מתוך totalApproved - כמה כבר אושרו גם על ידי האופרטיבי. */
+    totalToApproved: number;
     participants: Array<{
+      signupId: number;
       userId: number;
       companyId: string;
       fullName: string;
@@ -703,6 +710,8 @@ export interface ParticipantsResponse {
       teamName: string | null;
       sectorName: string | null;
       managerName: string | null;
+      /** null כל עוד האופרטיבי לא אישר - ראו POST .../to-approve. */
+      toApprovedAt: string | null;
     }>;
   }>;
 }

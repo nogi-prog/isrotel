@@ -296,8 +296,8 @@ authRouter.get('/debug-users', (_req, res) => {
         | undefined);
 
   const companyIds = [
-    chain?.ceo_cid ?? fallbackCeo?.company_id,
     organizer?.company_id,
+    chain?.ceo_cid ?? fallbackCeo?.company_id,
     chain?.division_cid,
     chain?.sector_cid,
     chain?.team_cid,
@@ -315,7 +315,7 @@ authRouter.get('/debug-users', (_req, res) => {
     .all(...companyIds)
     .map((row) => plain<UserRow>(row));
 
-  // שמירה על סדר ההיררכיה: אופרטיבי, רת״ח, רמ״ד, ר״צ, חייל.
+  // שמירה על סדר ההיררכיה: אופרטיבי, מפמ״ר, רת״ח, רמ״ד, ר״צ, חייל.
   const byCompanyId = new Map(rows.map((row) => [row.company_id, row]));
 
   res.json({

@@ -96,6 +96,20 @@ async function login(companyId: string): Promise<string> {
   return response.body.token as string;
 }
 
+/**
+ * אישור האופרטיבי לכל מי שהמפקדים כבר אישרו בגלישה, בכל הפעימות - שכבה
+ * נוספת מעל אישור המפקד (ראו POST .../to-approve-all). רוב הטסטים כאן לא
+ * עוסקים באישור הזה עצמו, ולכן קיצור הדרך הזה לפני נעילת שיבוצים/דוח מזון.
+ */
+async function toApproveTrip(tripId: number, toToken: string): Promise<void> {
+  const trip = await api('GET', `/api/trips/${tripId}`, { token: toToken });
+  assert.equal(trip.status, 200, JSON.stringify(trip.body));
+  for (const cycle of trip.body.trip.cycles) {
+    const response = await api('POST', `/api/trips/${tripId}/cycles/${cycle.id}/to-approve-all`, { token: toToken });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+  }
+}
+
 describe('API מקצה לקצה', () => {
   // מבנה ארגוני: רת״ח -> רמ״ד -> ר״צ -> חיילים
   // ובמקביל: אופרטיבי -> ר״צ -> חיילים, כי לאופרטיבי מדור משלו.
@@ -615,7 +629,7 @@ describe('API מקצה לקצה', () => {
       assert.equal(response.status, 200);
 
       const roles = response.body.users.map((entry: any) => entry.role);
-      assert.deepEqual(roles, ['ceo', 'to', 'division_leader', 'sector_leader', 'team_leader', 'employee']);
+      assert.deepEqual(roles, ['to', 'ceo', 'division_leader', 'sector_leader', 'team_leader', 'employee']);
 
       // הקישוריות היא הדרישה המרכזית: כל אחד כפוף בפועל לזה שמעליו ברשימה
       // (מלבד האופרטיבי, שאינו חלק משרשרת הפיקוד הרגילה).
@@ -628,7 +642,7 @@ describe('API מקצה לקצה', () => {
           },
         ]),
       );
-      const [ceo, , division, sector, team, employee] = response.body.users.map((entry: any) =>
+      const [, ceo, division, sector, team, employee] = response.body.users.map((entry: any) =>
         byCompanyId.get(entry.companyId),
       );
 
@@ -979,23 +993,31 @@ describe('API מקצה לקצה', () => {
     const soldierToken = await login('2000001');
     const denied = await api('POST', '/api/trips', {
       token: soldierToken,
-      body: { leaderIds: [sectorId], cycles: firstCycle },
+      body: { name: 'גלישה', leaderIds: [sectorId], cycles: firstCycle },
     });
     assert.equal(denied.status, 403);
 
     const toToken = await login('1000001');
 
+    // שם הגלישה חובה - הלקוח תמיד שולח את המפתח (גם ריק אחרי trim), ראו CreateTripPage.
+    const noName = await api('POST', '/api/trips', {
+      token: toToken,
+      body: { name: '', leaderIds: [sectorId], cycles: firstCycle },
+    });
+    assert.equal(noName.status, 400);
+    assert.match(noName.body.error, /שם/);
+
     // חובה לבחור לפחות מפקד אחד שישבץ אנשים.
     const noLeaders = await api('POST', '/api/trips', {
       token: toToken,
-      body: { leaderIds: [], cycles: firstCycle },
+      body: { name: 'גלישה', leaderIds: [], cycles: firstCycle },
     });
     assert.equal(noLeaders.status, 400);
 
     // חובה להגדיר לפחות פעימה אחת - החלוץ.
     const noCycles = await api('POST', '/api/trips', {
       token: toToken,
-      body: { leaderIds: [sectorId], cycles: [] },
+      body: { name: 'גלישה', leaderIds: [sectorId], cycles: [] },
     });
     assert.equal(noCycles.status, 400);
     assert.match(noCycles.body.error, /פעימה אחת/);
@@ -1004,6 +1026,7 @@ describe('API מקצה לקצה', () => {
     const sameDate = await api('POST', '/api/trips', {
       token: toToken,
       body: {
+        name: 'גלישה',
         leaderIds: [sectorId],
         cycles: [{ exitDate: '2026-09-08' }, { exitDate: '2026-09-08' }],
       },
@@ -1022,7 +1045,7 @@ describe('API מקצה לקצה', () => {
     // ר״צ אינו מהדרגים שיכולים לקבל את משימת השיבוץ.
     const wrongRole = await api('POST', '/api/trips', {
       token: toToken,
-      body: { leaderIds: [teamLeaderId], cycles: firstCycle },
+      body: { name: 'גלישה', leaderIds: [teamLeaderId], cycles: firstCycle },
     });
     assert.equal(wrongRole.status, 400);
     assert.match(wrongRole.body.error, /אינו מפמ״ר, רת״ח, רמ״ד או אופרטיבי/);
@@ -1030,39 +1053,44 @@ describe('API מקצה לקצה', () => {
     const today = new Date().toISOString().slice(0, 10);
     const created = await api('POST', '/api/trips', {
       token: toToken,
-      body: { leaderIds: [sectorId, divisionId], cycles: firstCycle },
+      body: { name: 'גלישת גיבוש קיץ', leaderIds: [sectorId, divisionId], cycles: firstCycle },
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     // המצב הראשון במכונת המצבים נקבע מיד ביצירה.
     assert.equal(created.body.trip.state, 'LAUNCHED');
     assert.equal(created.body.trip.leadersNotified, false);
-    // בלי שם מפורש - נוצר אוטומטית.
-    assert.match(created.body.trip.name, /^גלישה #\d+$/);
+    assert.equal(created.body.trip.name, 'גלישת גיבוש קיץ');
     // תאריך הפרסום הוא רגע הלחיצה על הכפתור - לא שדה שהאופרטיבי ממלא.
     assert.equal(created.body.trip.launchDate, today);
     assert.equal(created.body.trip.leaders.length, 2);
     // הפעימות נוצרות יחד עם הגלישה, והראשונה היא תמיד החלוץ.
     assert.equal(created.body.trip.cycles.length, 1);
     assert.equal(created.body.trip.cycles[0].name, 'חלוץ');
+    assert.equal(created.body.trip.cycles[0].customName, false);
     assert.equal(created.body.trip.cycles[0].exitDate, '2026-09-08');
     tripId = created.body.trip.id;
     cycleId = created.body.trip.cycles[0].id;
 
-    // אבל האופרטיבי יכול גם לבחור שם משלו.
-    const named = await api('POST', '/api/trips', {
-      token: toToken,
-      body: { name: 'גלישת גיבוש קיץ', leaderIds: [sectorId], cycles: firstCycle },
-    });
-    assert.equal(named.status, 201, JSON.stringify(named.body));
-    assert.equal(named.body.trip.name, 'גלישת גיבוש קיץ');
-
     // ואפשר לשנות את השם גם אחרי היצירה.
-    const renamed = await api('PATCH', `/api/trips/${named.body.trip.id}`, {
+    const renamed = await api('PATCH', `/api/trips/${created.body.trip.id}`, {
       token: toToken,
       body: { name: 'גלישת גיבוש קיץ - מעודכן' },
     });
     assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
     assert.equal(renamed.body.trip.name, 'גלישת גיבוש קיץ - מעודכן');
+
+    // ואפשר לתת שם מותאם אישית לפעימה כבר ביצירה - היא לא תיספר מחדש אוטומטית.
+    const namedCycle = await api('POST', '/api/trips', {
+      token: toToken,
+      body: {
+        name: 'גלישה עם פעימה בשם מותאם',
+        leaderIds: [sectorId],
+        cycles: [{ exitDate: '2026-09-09', name: 'מחזור קיץ' }],
+      },
+    });
+    assert.equal(namedCycle.status, 201, JSON.stringify(namedCycle.body));
+    assert.equal(namedCycle.body.trip.cycles[0].name, 'מחזור קיץ');
+    assert.equal(namedCycle.body.trip.cycles[0].customName, true);
   });
 
   test('שמות הפעימות נגזרים מסדר היציאה: חלוץ ואחריו פעימה 1', async () => {
@@ -1136,10 +1164,12 @@ describe('API מקצה לקצה', () => {
     for (const cycle of created.body.trip.cycles) {
       assert.deepEqual(Object.keys(cycle).sort(), [
         'approvedCount',
+        'customName',
         'exitDate',
         'id',
         'name',
         'pendingCount',
+        'toApprovedCount',
       ]);
     }
 
@@ -1150,7 +1180,7 @@ describe('API מקצה לקצה', () => {
     const columns = (db.prepare('PRAGMA table_info(cycles)').all() as Array<{ name: string }>).map(
       (column) => column.name,
     );
-    assert.deepEqual(columns.sort(), ['created_at', 'exit_date', 'id', 'name', 'trip_id']);
+    assert.deepEqual(columns.sort(), ['created_at', 'custom_name', 'exit_date', 'id', 'name', 'trip_id']);
 
     const removed = await api('DELETE', `/api/trips/${tripId}/cycles/${added.id}`, { token: toToken });
     assert.equal(removed.status, 200);
@@ -1292,7 +1322,7 @@ describe('API מקצה לקצה', () => {
     // גלישה נפרדת, שבה משימת השיבוץ מוטלת על האופרטיבי בלבד.
     const created = await api('POST', '/api/trips', {
       token: toToken,
-      body: { launchDate: '2026-08-05', leaderIds: [toId], cycles: [{ exitDate: '2026-11-10' }] },
+      body: { name: 'גלישה', launchDate: '2026-08-05', leaderIds: [toId], cycles: [{ exitDate: '2026-11-10' }] },
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const toTripId = created.body.trip.id as number;
@@ -1876,6 +1906,7 @@ describe('API מקצה לקצה', () => {
 
   test('אופרטיבי נועל את שיבוץ האוטובוסים וכולם מקבלים מספר אוטובוס', async () => {
     const toToken = await login('1000001');
+    await toApproveTrip(tripId, toToken);
 
     const preview = await api('GET', `/api/trips/${tripId}/buses/preview`, { token: toToken });
     assert.equal(preview.status, 200);
@@ -1946,6 +1977,7 @@ describe('API מקצה לקצה', () => {
 
   test('אופרטיבי נועל את שיבוץ הלינה תוך שמירת כל האילוצים', async () => {
     const toToken = await login('1000001');
+    await toApproveTrip(tripId, toToken);
     const locked = await api('POST', `/api/trips/${tripId}/dorms/lock`, { token: toToken, body: {} });
     assert.equal(locked.status, 200, JSON.stringify(locked.body));
 
@@ -2014,6 +2046,7 @@ describe('API מקצה לקצה', () => {
 
   test('דוח הזמנת המזון מסכם מנות לפי סוג תזונה', async () => {
     const toToken = await login('1000001');
+    await toApproveTrip(tripId, toToken);
     const food = await api('GET', `/api/trips/${tripId}/food`, { token: toToken });
     assert.equal(food.status, 200);
 
@@ -2465,7 +2498,7 @@ describe('API מקצה לקצה', () => {
       const toToken = await login('1000001');
       const created = await api('POST', '/api/trips', {
         token: toToken,
-        body: { launchDate: '2026-10-01', leaderIds: [divisionId], cycles: [{ exitDate: '2026-10-08' }] },
+        body: { name: 'גלישה', launchDate: '2026-10-01', leaderIds: [divisionId], cycles: [{ exitDate: '2026-10-08' }] },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       carTripId = created.body.trip.id;
@@ -2479,6 +2512,8 @@ describe('API מקצה לקצה', () => {
       });
       assert.equal(signed.status, 201, JSON.stringify(signed.body));
       assert.equal(signed.body.added, 5);
+
+      await toApproveTrip(carTripId, toToken);
     });
 
     test('רת״ח תמיד מגיע ברכב הפרטי שלו - אי אפשר לבקש עבורו, והוא מוחרג מהאוטובוס אוטומטית', async () => {
@@ -2503,7 +2538,7 @@ describe('API מקצה לקצה', () => {
       // הטסט הזה בודק רק את ההחרגה מהאוטובוס, לא את הרשאת השיבוץ.
       const ceoSignup = db
         .prepare(
-          `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved') RETURNING id`,
+          `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now')) RETURNING id`,
         )
         .get(carTripId, carCycleId, ceoId) as { id: number };
 
@@ -2621,7 +2656,7 @@ describe('API מקצה לקצה', () => {
       // ישירות במסד - הטסט בודק רק את הרשאת הרכב, לא את הרשאת השיבוץ.
       const toSignup = db
         .prepare(
-          `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved') RETURNING id`,
+          `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now')) RETURNING id`,
         )
         .get(carTripId, carCycleId, toId) as { id: number };
 
@@ -2679,7 +2714,7 @@ describe('API מקצה לקצה', () => {
 
       const created = await api('POST', '/api/trips', {
         token: toToken,
-        body: { launchDate: '2026-11-01', leaderIds: [divisionId], cycles: [{ exitDate: '2026-11-08' }] },
+        body: { name: 'גלישה', launchDate: '2026-11-01', leaderIds: [divisionId], cycles: [{ exitDate: '2026-11-08' }] },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const reopenTripId = created.body.trip.id;
@@ -2737,7 +2772,7 @@ describe('API מקצה לקצה', () => {
 
       const created = await api('POST', '/api/trips', {
         token: toToken,
-        body: { launchDate: '2026-11-15', leaderIds: [sectorId], cycles: [{ exitDate: '2026-11-20' }] },
+        body: { name: 'גלישה', launchDate: '2026-11-15', leaderIds: [sectorId], cycles: [{ exitDate: '2026-11-20' }] },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const bedTripId = created.body.trip.id;
@@ -2749,6 +2784,7 @@ describe('API מקצה לקצה', () => {
       });
       assert.equal(signed.status, 201, JSON.stringify(signed.body));
       assert.equal(signed.body.added, 5);
+      await toApproveTrip(bedTripId, toToken);
 
       // מבנה קטן בכוונה - רק 2 מיטות עבור 5 אנשים.
       const structure = await api('POST', `/api/trips/${bedTripId}/structures`, {
@@ -2783,7 +2819,7 @@ describe('API מקצה לקצה', () => {
 
       const created = await api('POST', '/api/trips', {
         token: toToken,
-        body: { launchDate: '2026-11-22', leaderIds: [sectorId], cycles: [{ exitDate: '2026-11-29' }] },
+        body: { name: 'גלישה', launchDate: '2026-11-22', leaderIds: [sectorId], cycles: [{ exitDate: '2026-11-29' }] },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const bulkTripId = created.body.trip.id;
@@ -2999,7 +3035,7 @@ describe('API מקצה לקצה', () => {
         .get(trip.id) as { id: number };
 
       const insertSignup = db.prepare(
-        `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved') RETURNING id`,
+        `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now')) RETURNING id`,
       );
       insertSignup.run(trip.id, cycle.id, soldierIds[0]!);
       insertSignup.run(trip.id, cycle.id, borrowedId);
@@ -3122,7 +3158,7 @@ describe('API מקצה לקצה', () => {
 
       const created = await api('POST', '/api/trips', {
         token: toToken,
-        body: { launchDate: '2026-12-01', leaderIds: [sectorId], cycles: [{ exitDate: '2026-12-08' }] },
+        body: { name: 'גלישה', launchDate: '2026-12-01', leaderIds: [sectorId], cycles: [{ exitDate: '2026-12-08' }] },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const shiftTripId = created.body.trip.id;
@@ -3221,7 +3257,7 @@ describe('API מקצה לקצה', () => {
       .get(trip.id) as { id: number };
 
     const insertSignup = db.prepare(
-      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved') RETURNING id`,
+      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now')) RETURNING id`,
     );
     const signupA = insertSignup.get(trip.id, cycle.id, first) as { id: number };
     insertSignup.run(trip.id, cycle.id, second);
@@ -3267,7 +3303,7 @@ describe('API מקצה לקצה', () => {
       .get(trip.id) as { id: number };
 
     const insertSignup = db.prepare(
-      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved') RETURNING id`,
+      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now')) RETURNING id`,
     );
     // הרמ״דית נוהגת ומצרפת חייל כנוסע; חייל נוסף מבקש רכב אבל טרם אושר.
     const driver = insertSignup.get(trip.id, cycle.id, sectorId) as { id: number };
@@ -3319,7 +3355,7 @@ describe('API מקצה לקצה', () => {
       .get(trip.id) as { id: number };
 
     const insertSignup = db.prepare(
-      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved')`,
+      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now'))`,
     );
     // חמישה חיילים בנים - אין שום מבנה או חדר מוגדר לגלישה הזאת בכלל.
     for (const id of [soldierIds[0]!, soldierIds[1]!, soldierIds[2]!]) insertSignup.run(trip.id, cycle.id, id);
@@ -3412,7 +3448,7 @@ describe('API מקצה לקצה', () => {
     const cycleC = makeCycle('פעימה 2', '2026-12-05');
 
     const insertSignup = db.prepare(
-      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status) VALUES (?, ?, ?, 'all', 'approved')`,
+      `INSERT INTO signups (trip_id, cycle_id, user_id, diet, status, to_approved_at) VALUES (?, ?, ?, 'all', 'approved', datetime('now'))`,
     );
 
     let nextCompanyId = 5920001;

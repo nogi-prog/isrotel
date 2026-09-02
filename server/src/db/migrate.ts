@@ -184,6 +184,12 @@ export function migrate(db: Db): void {
     console.log('[migrate] cycles.return_date הוסר');
   }
 
+  // האופרטיבי יכול לתת שם משלו לפעימה - ראו ההסבר ב-schema.sql וב-renumberCycles.
+  if (tableExists(db, 'cycles') && !columns(db, 'cycles').has('custom_name')) {
+    db.exec('ALTER TABLE cycles ADD COLUMN custom_name INTEGER NOT NULL DEFAULT 0 CHECK (custom_name IN (0, 1))');
+    console.log('[migrate] cycles.custom_name נוסף');
+  }
+
   // שמות הפעימות אינם מוזנים יותר אלא נגזרים מסדר היציאה: הפעימה הראשונה
   // היא "חלוץ" ואחריה "פעימה 1". פעימות שנוצרו עם שם ידני מקבלות את השם החדש.
   if (tableExists(db, 'cycles')) {
@@ -228,6 +234,13 @@ export function migrate(db: Db): void {
     db.exec('ALTER TABLE signups ADD COLUMN car_decided_at TEXT');
     db.exec('ALTER TABLE signups ADD COLUMN car_decision_note TEXT');
     console.log('[migrate] signups.car_status ועמודות הרכב הפרטי נוספו');
+  }
+
+  // אישור האופרטיבי - שכבה נוספת מעל אישור המפקד, ראו ההסבר ב-schema.sql.
+  if (tableExists(db, 'signups') && !columns(db, 'signups').has('to_approved_at')) {
+    db.exec('ALTER TABLE signups ADD COLUMN to_approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    db.exec('ALTER TABLE signups ADD COLUMN to_approved_at TEXT');
+    console.log('[migrate] signups.to_approved_at/to_approved_by נוספו');
   }
 
   // רת״ח ומפמ״ר תמיד מגיעים ברכב הפרטי שלהם - ראו ההסבר ב-schema.sql וב-lib/cars.ts.

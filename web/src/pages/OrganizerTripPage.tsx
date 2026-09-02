@@ -25,20 +25,22 @@ import {
 import { Alert, Badge, Card, Empty, Field, Loading, Stat } from '../components/ui';
 import { CarsCard } from '../components/CarsCard';
 import { ExportRosterButton } from '../components/ExportRosterButton';
+import { DateField } from '../components/DateField';
 
-type Tab = 'cycles' | 'dorms' | 'assignments' | 'participants';
+// משתתפים ראשון - זה החשוב ביותר, ולכן גם הלשונית שנפתחת כברירת מחדל.
+type Tab = 'participants' | 'cycles' | 'dorms' | 'assignments';
 
 const TAB_LABEL: Record<Tab, string> = {
+  participants: 'משתתפים',
   cycles: 'פעימות יציאה',
   dorms: 'מבני לינה',
   assignments: 'שיבוצים',
-  participants: 'משתתפים',
 };
 
 export function OrganizerTripPage() {
   const { tripId } = useParams();
   const trip = useApi<{ trip: Trip }>(tripId ? `/trips/${tripId}` : null);
-  const [tab, setTab] = useState<Tab>('cycles');
+  const [tab, setTab] = useState<Tab>('participants');
 
   if (trip.loading) return <Loading />;
   if (trip.error) return <Alert kind="error">{trip.error}</Alert>;
@@ -56,17 +58,8 @@ export function OrganizerTripPage() {
           </p>
         </div>
         <div className="row">
-          <Link to="/manage" className="btn btn--sm">
-            חזרה לגלישות
-          </Link>
           <Badge kind={data.state === 'LAUNCHED' ? 'ok' : 'default'}>{data.stateLabel}</Badge>
           {data.submitted && <Badge kind="info">השיבוץ קפוא</Badge>}
-          {/* דוח המזון רלוונטי רק בסיכום הגלישה, אחרי שהוא נסגר - לא כפעולה שוטפת. */}
-          {data.state === 'CLOSED' && (
-            <Link to={`/trips/${tripId}/food`} className="btn btn--sm">
-              הזמנת מזון
-            </Link>
-          )}
           {/* ייצוא ה-CSV זמין תמיד, לא רק בסיום - סיכום ביניים שימושי גם באמצע הגלישה. */}
           <ExportRosterButton tripId={tripId} tripName={data.name} />
           <StateControl trip={data} onChanged={() => void trip.reload()} />
@@ -89,19 +82,25 @@ export function OrganizerTripPage() {
         ))}
       </div>
 
+      {tab === 'participants' && <ParticipantsTab tripId={tripId} />}
       {tab === 'cycles' && <CyclesTab trip={data} onChanged={() => void trip.reload()} />}
       {tab === 'dorms' && <DormsTab trip={data} />}
       {tab === 'assignments' && <AssignmentsTab trip={data} onChanged={() => void trip.reload()} />}
-      {tab === 'participants' && <ParticipantsTab tripId={tripId} />}
     </>
   );
 }
 
 // --- מכונת המצבים של הגלישה ------------------------------------------------
 
+/**
+ * מעבר בין פורסם (ירוק - הגלישה פתוחה) לסגור (אדום - הגלישה נסגרה) -
+ * פעולה בעלת השפעה רחבה (חוסמת שיבוץ, פותחת דוח מזון), ולכן דורשת אישור
+ * מפורש לפני שהיא חלה, בדיוק כמו מחיקת גלישה.
+ */
 function StateControl({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const setState = async (state: 'LAUNCHED' | 'CLOSED') => {
     setError('');
@@ -113,21 +112,43 @@ function StateControl({ trip, onChanged }: { trip: Trip; onChanged: () => void }
       setError(errorMessage(caught));
     } finally {
       setBusy(false);
+      setConfirming(false);
     }
   };
+
+  const opening = trip.state !== 'LAUNCHED';
+
+  if (confirming) {
+    return (
+      <div className="row">
+        {error && <Alert kind="error">{error}</Alert>}
+        <span className="small muted">{opening ? 'לפתוח מחדש את הגלישה?' : 'לסגור את הגלישה?'}</span>
+        <button
+          type="button"
+          className={`btn btn--sm ${opening ? 'btn--success' : 'btn--danger'}`}
+          disabled={busy}
+          onClick={() => void setState(opening ? 'LAUNCHED' : 'CLOSED')}
+        >
+          {busy ? '...' : opening ? 'כן, לפתוח' : 'כן, לסגור'}
+        </button>
+        <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setConfirming(false)}>
+          ביטול
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>
       {error && <Alert kind="error">{error}</Alert>}
-      {trip.state === 'LAUNCHED' ? (
-        <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void setState('CLOSED')}>
-          סגירת הגלישה
-        </button>
-      ) : (
-        <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void setState('LAUNCHED')}>
-          פתיחה מחדש
-        </button>
-      )}
+      <button
+        type="button"
+        className={`btn btn--sm ${opening ? 'btn--success' : 'btn--danger'}`}
+        disabled={busy}
+        onClick={() => setConfirming(true)}
+      >
+        {opening ? 'פתיחה מחדש' : 'סגירת הגלישה'}
+      </button>
     </>
   );
 }
@@ -268,6 +289,7 @@ function SubmitTripPanel({ trip, onChanged }: { trip: Trip; onChanged: () => voi
   return (
     <Card
       title="הגשת הגלישה"
+      defaultCollapsed
       actions={
         trip.submitted ? (
           <Badge kind="ok">
@@ -398,7 +420,7 @@ function LeadersCard({ trip, onChanged }: { trip: Trip; onChanged: () => void })
   };
 
   return (
-    <Card title={`מפקדים עם משימת שיבוץ (${trip.leaders.length})`}>
+    <Card title={`מפקדים עם משימת שיבוץ (${trip.leaders.length})`} defaultCollapsed>
       <Alert kind="error">{error}</Alert>
       {locked && <Alert kind="warn">אי אפשר לשנות מפקדים אחרי נעילת האוטובוסים או הלינה.</Alert>}
 
@@ -453,16 +475,19 @@ function LeadersCard({ trip, onChanged }: { trip: Trip; onChanged: () => void })
 
 function CyclesTab({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
   const [exitDate, setExitDate] = useState('');
+  const [cycleName, setCycleName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
     setBusy(true);
     try {
-      await api.post(`/trips/${trip.id}/cycles`, { exitDate });
+      await api.post(`/trips/${trip.id}/cycles`, { exitDate, ...(cycleName.trim() ? { name: cycleName.trim() } : {}) });
       setExitDate('');
+      setCycleName('');
       onChanged();
     } catch (caught) {
       setError(errorMessage(caught, 'הוספת הפעימה נכשלה'));
@@ -484,24 +509,27 @@ function CyclesTab({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
   return (
     <>
       <Alert kind="error">{error}</Alert>
-      {trip.submitted && <Alert kind="warn">הגלישה הוגשה והשיבוץ קפוא. יש לפתוח את השיבוץ מחדש כדי לשנות פעימות.</Alert>}
+      {trip.submitted && (
+        <Alert kind="warn">
+          הגלישה הוגשה והשיבוץ קפוא - אפשר עדיין להוסיף ולערוך פעימות, אבל כדי לשבץ אנשים לתוכן יש לפתוח את
+          ההגשה מחדש.
+        </Alert>
+      )}
 
       <LeadersCard trip={trip} onChanged={onChanged} />
 
       <Card title={`פעימות יציאה (${trip.cycles.length})`}>
-        {!trip.submitted && (
-          <form onSubmit={add} className="field-row field-row--end" style={{ marginBottom: '1rem' }}>
-            <Field
-              label="הוספת פעימת יציאה"
-              hint="השם נגזר מסדר היציאה: ראשונה היא החלוץ, ואחריה פעימה 1, פעימה 2 וכן הלאה"
-            >
-              <input type="date" value={exitDate} onChange={(event) => setExitDate(event.target.value)} required />
+        <form onSubmit={add} className="stack" style={{ marginBottom: '1rem' }}>
+          <div className="field-row field-row--pair">
+            <DateField label="תאריך יציאה" value={exitDate} onChange={setExitDate} required />
+            <Field label="שם הפעימה (לא חובה)" hint="ריק - יחושב אוטומטית לפי סדר היציאה">
+              <input value={cycleName} onChange={(event) => setCycleName(event.target.value)} placeholder="לדוגמה: חלוץ" />
             </Field>
-            <button type="submit" className="btn btn--primary" disabled={busy}>
-              הוספה
-            </button>
-          </form>
-        )}
+          </div>
+          <button type="submit" className="btn btn--primary" disabled={busy} style={{ alignSelf: 'start' }}>
+            הוספה
+          </button>
+        </form>
 
         {trip.cycles.length === 0 ? (
           <Empty>לא הוגדרו פעימות יציאה. אי אפשר לשבץ אנשים בלי פעימה אחת לפחות.</Empty>
@@ -511,52 +539,126 @@ function CyclesTab({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
               <thead>
                 <tr>
                   <th>פעימה</th>
-                  <th>יציאה</th>
                   <th>מאושרים</th>
                   <th>ממתינים</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {trip.cycles.map((cycle) => (
-                  <tr key={cycle.id}>
-                    <td data-label="פעימה">{cycle.name}</td>
-                    <td data-label="יציאה">{formatDate(cycle.exitDate)}</td>
-                    <td data-label="מאושרים">
-                      <Badge kind="ok">{cycle.approvedCount}</Badge>
-                    </td>
-                    <td data-label="ממתינים">
-                      {cycle.pendingCount > 0 ? (
-                        <Badge kind="warn">{cycle.pendingCount}</Badge>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td data-label="פעולות">
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--danger"
-                        onClick={() => void remove(cycle.id)}
-                        disabled={trip.submitted || cycle.approvedCount + cycle.pendingCount > 0}
-                        title={
-                          trip.submitted
-                            ? 'הגלישה הוגשה - השיבוץ קפוא'
-                            : cycle.approvedCount + cycle.pendingCount > 0
-                              ? 'יש נרשמים לפעימה הזו'
-                              : undefined
-                        }
-                      >
-                        מחיקה
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {trip.cycles.map((cycle) =>
+                  editingId === cycle.id ? (
+                    <EditCycleRow
+                      key={cycle.id}
+                      trip={trip}
+                      cycle={cycle}
+                      onClose={() => setEditingId(null)}
+                      onSaved={() => {
+                        setEditingId(null);
+                        onChanged();
+                      }}
+                    />
+                  ) : (
+                    <tr key={cycle.id}>
+                      <td data-label="פעימה">
+                        <strong>{cycle.name}</strong>
+                        <span className="muted small"> · {formatDate(cycle.exitDate)}</span>
+                        {cycle.customName && <span className="muted small"> (שם מותאם)</span>}
+                      </td>
+                      <td data-label="מאושרים">
+                        <Badge kind="ok">{cycle.approvedCount}</Badge>
+                      </td>
+                      <td data-label="ממתינים">
+                        {cycle.pendingCount > 0 ? (
+                          <Badge kind="warn">{cycle.pendingCount}</Badge>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td data-label="פעולות">
+                        <div className="row">
+                          <button type="button" className="btn btn--sm" onClick={() => setEditingId(cycle.id)}>
+                            עריכה
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--danger"
+                            onClick={() => void remove(cycle.id)}
+                            disabled={cycle.approvedCount + cycle.pendingCount > 0}
+                            title={cycle.approvedCount + cycle.pendingCount > 0 ? 'יש נרשמים לפעימה הזו' : undefined}
+                          >
+                            מחיקה
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           </div>
         )}
       </Card>
     </>
+  );
+}
+
+/** שורת עריכת פעימה קיימת - שם ותאריך יציאה, ראו PATCH /trips/:id/cycles/:cycleId. */
+function EditCycleRow({
+  trip,
+  cycle,
+  onClose,
+  onSaved,
+}: {
+  trip: Trip;
+  cycle: Trip['cycles'][number];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(cycle.name);
+  const [exitDate, setExitDate] = useState(cycle.exitDate);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (!name.trim()) {
+      setError('שם הפעימה לא יכול להישאר ריק');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.patch(`/trips/${trip.id}/cycles/${cycle.id}`, { name: name.trim(), exitDate });
+      onSaved();
+    } catch (caught) {
+      setError(errorMessage(caught, 'עדכון הפעימה נכשל'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td colSpan={4} className="edit-row">
+        <form onSubmit={save} className="stack">
+          <div className="field-row field-row--pair">
+            <Field label="שם הפעימה">
+              <input value={name} onChange={(event) => setName(event.target.value)} required autoFocus />
+            </Field>
+            <DateField label="תאריך יציאה" value={exitDate} onChange={setExitDate} required />
+          </div>
+          <div className="row">
+            <button type="submit" className="btn btn--sm btn--primary" disabled={busy}>
+              {busy ? 'שומר...' : 'שמירה'}
+            </button>
+            <button type="button" className="btn btn--sm btn--ghost" onClick={onClose}>
+              ביטול
+            </button>
+          </div>
+          {error && <Alert kind="error">{error}</Alert>}
+        </form>
+      </td>
+    </tr>
   );
 }
 
@@ -909,7 +1011,9 @@ function AssignmentsTab({ trip, onChanged }: { trip: Trip; onChanged: () => void
   };
 
   const totalApproved = trip.cycles.reduce((sum, cycle) => sum + cycle.approvedCount, 0);
+  const totalToApproved = trip.cycles.reduce((sum, cycle) => sum + cycle.toApprovedCount, 0);
   const totalPending = trip.cycles.reduce((sum, cycle) => sum + cycle.pendingCount, 0);
+  const awaitingToApproval = totalApproved - totalToApproved;
 
   return (
     <>
@@ -917,7 +1021,8 @@ function AssignmentsTab({ trip, onChanged }: { trip: Trip; onChanged: () => void
       <Alert kind="success">{message}</Alert>
 
       <div className="stat-grid" style={{ marginBottom: '1rem' }}>
-        <Stat value={totalApproved} label="נרשמים מאושרים" />
+        <Stat value={totalToApproved} label="אושרו סופית (על ידך)" />
+        <Stat value={awaitingToApproval} label="ממתינים לאישורך" />
         <Stat value={totalPending} label="ממתינים לאישור מפקד" />
       </div>
 
@@ -926,6 +1031,12 @@ function AssignmentsTab({ trip, onChanged }: { trip: Trip; onChanged: () => void
       {totalPending > 0 && (
         <Alert kind="warn">
           יש {totalPending} בקשות שממתינות לאישור מפקד. הן לא ייכנסו לשיבוץ עד שיאושרו.
+        </Alert>
+      )}
+      {awaitingToApproval > 0 && (
+        <Alert kind="warn">
+          יש {awaitingToApproval} אנשים שהמפקד אישר אבל אתה עוד לא - הם לא ייכנסו לשיבוץ עד שתאשר אותם בלשונית
+          "משתתפים".
         </Alert>
       )}
 
@@ -960,7 +1071,7 @@ function AssignmentsTab({ trip, onChanged }: { trip: Trip; onChanged: () => void
             <button
               type="button"
               className="btn btn--primary btn--block"
-              disabled={busy !== null || totalApproved === 0}
+              disabled={busy !== null || totalToApproved === 0}
               onClick={() => void run('buses/lock', 'שיבוץ האוטובוסים חושב, נשמר ופורסם')}
             >
               {busy === 'buses/lock' ? 'מחשב...' : 'נעילה וחישוב שיבוץ'}
@@ -1005,7 +1116,7 @@ function AssignmentsTab({ trip, onChanged }: { trip: Trip; onChanged: () => void
               <button
                 type="button"
                 className="btn btn--primary btn--block"
-                disabled={busy !== null || totalApproved === 0}
+                disabled={busy !== null || totalToApproved === 0}
                 onClick={() => void run('dorms/lock', 'שיבוץ הלינה חושב, נשמר ופורסם')}
               >
                 {busy === 'dorms/lock' ? 'מחשב...' : 'נעילה וחישוב שיבוץ'}
@@ -1022,65 +1133,189 @@ function AssignmentsTab({ trip, onChanged }: { trip: Trip; onChanged: () => void
 
 // --- משתתפים --------------------------------------------------------------
 
+/**
+ * סקירת האופרטיבי על מי שהמפקדים שיבצו: רשימה מלאה לפי פעימה. אישור המפקד
+ * לבדו כבר לא מספיק - עד שהאופרטיבי מאשר כל אחד (או את כולם בבת אחת), האדם
+ * לא נכנס לשיבוץ אוטובוסים/לינה ולא נספר בדוח המזון (ראו loadCycleParticipants
+ * בשרת). אפשר גם להסיר מי שלא אמור להיות ברשימה בכלל.
+ */
 function ParticipantsTab({ tripId }: { tripId: string }) {
-  const { data, loading, error } = useApi<ParticipantsResponse>(`/trips/${tripId}/participants`);
+  const { data, loading, error, reload } = useApi<ParticipantsResponse>(`/trips/${tripId}/participants`);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<number | string | null>(null);
+  const [actionError, setActionError] = useState('');
+
+  const remove = async (signupId: number) => {
+    setActionError('');
+    setBusyId(signupId);
+    try {
+      await api.delete(`/trips/${tripId}/signups/${signupId}`);
+      setConfirmingId(null);
+      await reload();
+    } catch (caught) {
+      setActionError(errorMessage(caught, 'ההסרה נכשלה'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const approve = async (signupId: number) => {
+    setActionError('');
+    setBusyId(signupId);
+    try {
+      await api.post(`/trips/${tripId}/signups/${signupId}/to-approve`);
+      await reload();
+    } catch (caught) {
+      setActionError(errorMessage(caught, 'האישור נכשל'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const approveAll = async (cycleId: number) => {
+    setActionError('');
+    setBusyId(`cycle-${cycleId}`);
+    try {
+      await api.post(`/trips/${tripId}/cycles/${cycleId}/to-approve-all`);
+      await reload();
+    } catch (caught) {
+      setActionError(errorMessage(caught, 'האישור המרוכז נכשל'));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   if (loading) return <Loading />;
 
   return (
     <>
+      <Alert kind="info">
+        רשימת מי שהמפקדים שיבצו בכל פעימה - אישור שלך נדרש לכל אחד לפני שהוא נכנס לשיבוץ האוטובוסים, הלינה
+        ודוח המזון. אפשר לאשר אחד-אחד או את כולם יחד, ואפשר להסיר מי שלא אמור להיות ברשימה.
+      </Alert>
       <Alert kind="error">{error}</Alert>
+      <Alert kind="error">{actionError}</Alert>
 
-      {(data?.cycles ?? []).map((cycle) => (
-        <Card
-          key={cycle.cycleId}
-          title={`${cycle.cycleName} · יציאה ${formatDate(cycle.exitDate)}`}
-          actions={<Badge kind="ok">{cycle.totalApproved} מאושרים</Badge>}
-        >
-          {cycle.participants.length === 0 ? (
-            <Empty>אין משתתפים מאושרים בפעימה הזו.</Empty>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>שם</th>
-                    <th>מספר אישי</th>
-                    <th>תפקיד</th>
-                    <th>מדור</th>
-                    <th>צוות</th>
-                    <th>מין</th>
-                    <th>תזונה</th>
-                    <th>מפקד</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cycle.participants.map((participant, index) => (
-                    <tr key={participant.userId}>
-                      <td className="muted" data-label="#">{index + 1}</td>
-                      <td data-label="שם">{participant.fullName}</td>
-                      <td data-label="מספר אישי">{participant.companyId}</td>
-                      <td data-label="תפקיד">{ROLE_LABEL[participant.role]}</td>
-                      <td className="muted" data-label="מדור">{participant.sectorName ?? '—'}</td>
-                      <td className="muted" data-label="צוות">{participant.teamName ?? '—'}</td>
-                      <td data-label="מין">{GENDER_LABEL_SINGULAR[participant.gender]}</td>
-                      <td data-label="תזונה">
-                        {participant.diet === 'all' ? (
-                          <span className="muted">{DIET_LABEL.all}</span>
-                        ) : (
-                          <Badge kind="warn">{DIET_LABEL[participant.diet]}</Badge>
-                        )}
-                      </td>
-                      <td className="muted" data-label="מפקד">{participant.managerName ?? '—'}</td>
+      {(data?.cycles ?? []).map((cycle) => {
+        const awaiting = cycle.totalApproved - cycle.totalToApproved;
+        return (
+          <Card
+            key={cycle.cycleId}
+            title={`${cycle.cycleName} · יציאה ${formatDate(cycle.exitDate)}`}
+            actions={
+              <>
+                <Badge kind={awaiting > 0 ? 'warn' : 'ok'}>
+                  {cycle.totalToApproved}/{cycle.totalApproved} אושרו על ידך
+                </Badge>
+                {awaiting > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--primary"
+                    disabled={busyId === `cycle-${cycle.cycleId}`}
+                    onClick={() => void approveAll(cycle.cycleId)}
+                  >
+                    {busyId === `cycle-${cycle.cycleId}` ? 'מאשר...' : `אישור כל ${awaiting} הממתינים`}
+                  </button>
+                )}
+              </>
+            }
+          >
+            {cycle.participants.length === 0 ? (
+              <Empty>אין משתתפים מאושרים בפעימה הזו.</Empty>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>שם</th>
+                      <th>מספר אישי</th>
+                      <th>תפקיד</th>
+                      <th>מדור</th>
+                      <th>צוות</th>
+                      <th>מין</th>
+                      <th>תזונה</th>
+                      <th>מפקד</th>
+                      <th>מצב</th>
+                      <th />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      ))}
+                  </thead>
+                  <tbody>
+                    {cycle.participants.map((participant, index) => (
+                      <tr key={participant.userId}>
+                        <td className="muted" data-label="#">{index + 1}</td>
+                        <td data-label="שם">{participant.fullName}</td>
+                        <td data-label="מספר אישי">{participant.companyId}</td>
+                        <td data-label="תפקיד">{ROLE_LABEL[participant.role]}</td>
+                        <td className="muted" data-label="מדור">{participant.sectorName ?? '—'}</td>
+                        <td className="muted" data-label="צוות">{participant.teamName ?? '—'}</td>
+                        <td data-label="מין">{GENDER_LABEL_SINGULAR[participant.gender]}</td>
+                        <td data-label="תזונה">
+                          {participant.diet === 'all' ? (
+                            <span className="muted">{DIET_LABEL.all}</span>
+                          ) : (
+                            <Badge kind="warn">{DIET_LABEL[participant.diet]}</Badge>
+                          )}
+                        </td>
+                        <td className="muted" data-label="מפקד">{participant.managerName ?? '—'}</td>
+                        <td data-label="מצב">
+                          {participant.toApprovedAt ? (
+                            <Badge kind="ok">מאושר</Badge>
+                          ) : (
+                            <Badge kind="warn">ממתין לאישורך</Badge>
+                          )}
+                        </td>
+                        <td data-label="פעולות">
+                          {confirmingId === participant.signupId ? (
+                            <div className="row">
+                              <button
+                                type="button"
+                                className="btn btn--sm btn--danger"
+                                disabled={busyId === participant.signupId}
+                                onClick={() => void remove(participant.signupId)}
+                              >
+                                {busyId === participant.signupId ? 'מסיר...' : 'אישור הסרה'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--sm btn--ghost"
+                                disabled={busyId === participant.signupId}
+                                onClick={() => setConfirmingId(null)}
+                              >
+                                ביטול
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="row">
+                              {!participant.toApprovedAt && (
+                                <button
+                                  type="button"
+                                  className="btn btn--sm btn--success"
+                                  disabled={busyId === participant.signupId}
+                                  onClick={() => void approve(participant.signupId)}
+                                >
+                                  {busyId === participant.signupId ? 'מאשר...' : 'אישור'}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn--sm btn--danger"
+                                onClick={() => setConfirmingId(participant.signupId)}
+                              >
+                                הסרה
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        );
+      })}
     </>
   );
 }

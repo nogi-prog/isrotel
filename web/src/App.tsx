@@ -12,6 +12,7 @@ import { TripPage } from './pages/TripPage';
 import { TripSigningPage } from './pages/TripSigningPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { SoldiersPage } from './pages/SoldiersPage';
 import { BusesPage } from './pages/BusesPage';
 import { DormsPage } from './pages/DormsPage';
 import { DormIssuesPage } from './pages/DormIssuesPage';
@@ -55,8 +56,7 @@ function AppRoutes() {
         <Route path="/trips/:tripId/dorm-issues" element={<DormIssuesPage />} />
         <Route path="/trips/:tripId/food" element={<FoodPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
-        {/* "האנשים שלי" מוזג לתוך הפרופיל - הנתיב נשאר כהפניה כי התראות ישנות מצביעות אליו. */}
-        <Route path="/my-team" element={<Navigate to="/profile" replace />} />
+        <Route path="/my-team" element={<SoldiersPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         {user.isTripOrganizer && (

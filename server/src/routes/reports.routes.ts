@@ -32,7 +32,7 @@ reportsRouter.get('/:id/food', requireTO, (req, res) => {
     .prepare(
       `SELECT s.cycle_id, s.diet, COUNT(*) AS count
          FROM signups s
-        WHERE s.trip_id = ? AND s.status = 'approved'
+        WHERE s.trip_id = ? AND s.status = 'approved' AND s.to_approved_at IS NOT NULL
         GROUP BY s.cycle_id, s.diet`,
     )
     .all(trip.id) as Array<{ cycle_id: number; diet: Diet; count: number }>;
@@ -199,7 +199,9 @@ reportsRouter.get('/:id/participants', (req, res) => {
   const visibleIds = user.role === 'to' ? null : new Set([user.id, ...subordinateIds(db, user.id)]);
 
   const cycles = listCycles(trip.id).map((cycle) => {
-    const all = loadCycleParticipants(cycle.id);
+    // requireToApproval: false - מציג גם מי שהמפקד אישר אבל האופרטיבי עדיין לא,
+    // כדי שיהיה מה לסקור/לאשר במסך הזה (ראו POST .../to-approve).
+    const all = loadCycleParticipants(cycle.id, { requireToApproval: false });
     const visible = visibleIds ? all.filter((person) => visibleIds.has(person.userId)) : all;
 
     return {
@@ -207,7 +209,9 @@ reportsRouter.get('/:id/participants', (req, res) => {
       cycleName: cycle.name,
       exitDate: cycle.exit_date,
       totalApproved: all.length,
+      totalToApproved: all.filter((person) => person.toApprovedAt != null).length,
       participants: visible.map((person) => ({
+        signupId: person.signupId,
         userId: person.userId,
         companyId: person.companyId,
         fullName: person.name,
@@ -217,6 +221,7 @@ reportsRouter.get('/:id/participants', (req, res) => {
         teamName: person.teamName,
         sectorName: person.sectorName,
         managerName: person.managerName,
+        toApprovedAt: person.toApprovedAt,
       })),
     };
   });
@@ -407,7 +412,9 @@ reportsRouter.get('/:id/export.xlsx', requireRole('to', 'division_leader'), asyn
   for (const cycle of listCycles(trip.id)) {
     // הרשימה המלאה נשארת לחיפוש שמות (נהג/נוסע/שותף לחדר עשויים להיות מחוץ
     // לתחום של הרת״ח), אבל שורה מיוצאת רק למי שנמצא ב-visibleIds.
-    const participants = loadCycleParticipants(cycle.id);
+    // ייצוא ביניים שימושי גם באמצע הגלישה - כמו מסך המשתתפים, מציג גם מי
+    // שממתין לאישור האופרטיבי (requireToApproval: false).
+    const participants = loadCycleParticipants(cycle.id, { requireToApproval: false });
     if (participants.length === 0) continue;
     const visible = visibleIds ? participants.filter((person) => visibleIds.has(person.userId)) : participants;
     if (visible.length === 0) continue;

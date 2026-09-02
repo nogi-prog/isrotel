@@ -42,14 +42,17 @@ export function listCycles(tripId: number): CycleRow[] {
  * מחשב מחדש את שמות הפעימות לפי סדר היציאה: הראשונה "חלוץ" ואחריה
  * "פעימה 1" וכן הלאה. נקרא אחרי כל הוספה, שינוי תאריך או מחיקה, כדי
  * שהמספור יישאר רצוף וישקף את הסדר בפועל.
+ * פעימה עם custom_name=1 (האופרטיבי בחר לה שם משלו - ראו PATCH
+ * /trips/:id/cycles/:cycleId) מדולגת: השם שלה לא נדרס, אבל היא עדיין
+ * תופסת את מקומה בסדר לצורך המספור של שאר הפעימות.
  */
 export function renumberCycles(tripId: number): void {
-  const rows = db.prepare('SELECT id, name FROM cycles WHERE trip_id = ? ORDER BY exit_date, id').all(tripId) as Array<{
-    id: number;
-    name: string;
-  }>;
+  const rows = db
+    .prepare('SELECT id, name, custom_name FROM cycles WHERE trip_id = ? ORDER BY exit_date, id')
+    .all(tripId) as Array<{ id: number; name: string; custom_name: number }>;
   const rename = db.prepare('UPDATE cycles SET name = ? WHERE id = ?');
   rows.forEach((row, index) => {
+    if (row.custom_name) return;
     const name = cycleName(index);
     if (row.name !== name) rename.run(name, row.id);
   });
@@ -86,20 +89,28 @@ export interface ParticipantRecord {
   workerType: WorkerType;
   borrowedFrom: string | null;
   borrowedMission: string | null;
+  /** אישור האופרטיבי - null כל עוד לא אושר. ראו requireToApproval למטה. */
+  toApprovedAt: string | null;
 }
 
 /**
- * טוען את כל המשתתפים המאושרים בפעימה.
- * רק הרשמות שאושרו על ידי המפקד נכנסות לשיבוצים.
+ * טוען את המשתתפים בפעימה שהמפקד אישר.
+ *
+ * `requireToApproval` (ברירת מחדל true) מסנן גם לפי אישור האופרטיבי
+ * (to_approved_at) - זה מה שקובע מי "נכנס" בפועל לשיבוץ אוטובוסים/לינה
+ * ולדוח המזון: אישור המפקד לבדו אינו מספיק יותר. false משמש למסכי סקירה
+ * (משתתפים, ייצוא Excel) שצריכים להראות גם מי שממתין לאישור האופרטיבי.
  */
-export function loadCycleParticipants(cycleId: number): ParticipantRecord[] {
+export function loadCycleParticipants(cycleId: number, options: { requireToApproval?: boolean } = {}): ParticipantRecord[] {
+  const requireToApproval = options.requireToApproval ?? true;
   const rows = db
     .prepare(
       `SELECT s.id AS signup_id, s.diet AS signup_diet, s.car_status AS signup_car_status,
-              s.car_passenger_id AS signup_car_passenger_id, u.*
+              s.car_passenger_id AS signup_car_passenger_id, s.to_approved_at AS signup_to_approved_at, u.*
          FROM signups s
          JOIN users u ON u.id = s.user_id
         WHERE s.cycle_id = ? AND s.status = 'approved'
+          ${requireToApproval ? "AND s.to_approved_at IS NOT NULL" : ''}
         ORDER BY u.id`,
     )
     .all(cycleId)
@@ -110,6 +121,7 @@ export function loadCycleParticipants(cycleId: number): ParticipantRecord[] {
           signup_diet: Diet;
           signup_car_status: CarStatus;
           signup_car_passenger_id: number | null;
+          signup_to_approved_at: string | null;
         }
       >(row),
     );
@@ -195,6 +207,7 @@ export function loadCycleParticipants(cycleId: number): ParticipantRecord[] {
       workerType: row.worker_type,
       borrowedFrom: row.borrowed_from,
       borrowedMission: row.borrowed_mission,
+      toApprovedAt: row.signup_to_approved_at,
     };
   });
 }

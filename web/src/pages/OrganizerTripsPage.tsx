@@ -53,6 +53,11 @@ export function OrganizerTripsPage() {
                 </div>
               </div>
             }
+            actions={
+              <Link to={`/manage/${trip.id}`} className="btn btn--sm btn--primary">
+                ניהול גלישה
+              </Link>
+            }
           >
             <div className="stack">
               <div>
@@ -85,7 +90,10 @@ export function OrganizerTripsPage() {
                       </span>
                       <span className="muted small">
                         {cycle.approvedCount} שובצו
-                        {cycle.pendingCount > 0 ? ` · ${cycle.pendingCount} ממתינים` : ''}
+                        {cycle.pendingCount > 0 ? ` · ${cycle.pendingCount} ממתינים למפקד` : ''}
+                        {cycle.approvedCount - cycle.toApprovedCount > 0
+                          ? ` · ${cycle.approvedCount - cycle.toApprovedCount} ממתינים לאישורך`
+                          : ''}
                       </span>
                     </li>
                   ))}
@@ -107,10 +115,6 @@ export function OrganizerTripsPage() {
                 {trip.busesLocked ? <Badge kind="ok">אוטובוסים נעולים</Badge> : <Badge>אוטובוסים פתוחים</Badge>}
                 {trip.dormsLocked ? <Badge kind="ok">לינה נעולה</Badge> : <Badge>לינה פתוחה</Badge>}
               </div>
-
-              <Link to={`/manage/${trip.id}`} className="btn btn--primary btn--block">
-                ניהול הגלישה
-              </Link>
 
               <DeleteTripControl trip={trip} onDeleted={afterDelete} />
             </div>

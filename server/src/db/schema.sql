@@ -203,6 +203,9 @@ CREATE TABLE IF NOT EXISTS cycles (
   trip_id     INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
   name        TEXT    NOT NULL,
   exit_date   TEXT    NOT NULL,
+  -- כשהאופרטיבי בוחר שם משלו ל-name, custom_name=1 - renumberCycles (lib/trips.ts)
+  -- מדלג על פעימה כזאת ולא דורס את השם בסידור מחדש לפי תאריך.
+  custom_name INTEGER NOT NULL DEFAULT 0 CHECK (custom_name IN (0, 1)),
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -234,6 +237,12 @@ CREATE TABLE IF NOT EXISTS signups (
   car_decided_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
   car_decided_at      TEXT,
   car_decision_note   TEXT,
+  -- אישור האופרטיבי - שכבה נוספת מעל אישור המפקד (status='approved'): עד
+  -- שהאופרטיבי מאשר, האדם לא נכנס לשיבוץ אוטובוסים/לינה ולא נספר בדוח המזון
+  -- (ראו loadCycleParticipants ב-lib/trips.ts). האישור עצמו נשאר החלטת המפקד,
+  -- זו רק בדיקה נוספת של האופרטיבי לפני שהשיבוץ נחשב סופי.
+  to_approved_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  to_approved_at      TEXT,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (trip_id, user_id)
 );

@@ -276,6 +276,8 @@ export interface CycleRow {
   trip_id: number;
   name: string;
   exit_date: string;
+  /** האופרטיבי בחר שם משלו - renumberCycles מדלג על הפעימה הזאת בסידור מחדש. */
+  custom_name: number;
   created_at: string;
 }
 
@@ -301,6 +303,9 @@ export interface SignupRow {
   car_decided_by: number | null;
   car_decided_at: string | null;
   car_decision_note: string | null;
+  /** אישור האופרטיבי - שכבה נוספת מעל אישור המפקד, ראו schema.sql. */
+  to_approved_by: number | null;
+  to_approved_at: string | null;
   created_at: string;
 }
 

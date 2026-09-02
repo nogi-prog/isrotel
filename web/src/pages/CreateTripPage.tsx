@@ -3,21 +3,24 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type SigningLeaderOption, type Trip } from '../lib/api';
 import { errorMessage, useApi } from '../lib/useApi';
 import { cycleName, ROLE_LABEL } from '../lib/he';
-import { Alert, Badge, Card, Empty, Field, Loading } from '../components/ui';
+import { Alert, Card, Empty, Field, Loading } from '../components/ui';
+import { DateField } from '../components/DateField';
 
-/** שורת פעימה בטופס. תאריך יציאה בלבד - השם נגזר מסדר היציאה. */
+/** שורת פעימה בטופס. תאריך יציאה, ושם מותאם אישית אופציונלי (ברירת המחדל נגזרת מסדר היציאה). */
 interface CycleDraft {
   key: number;
   exitDate: string;
+  name: string;
 }
 
 let nextKey = 1;
-const emptyCycle = (): CycleDraft => ({ key: nextKey++, exitDate: '' });
+const emptyCycle = (): CycleDraft => ({ key: nextKey++, exitDate: '', name: '' });
 
 /**
  * מסך יצירת גלישה. עומד בנפרד מרשימת הגלישות כדי שהמסך יעסוק רק בגלישה החדש.
- * שם הגלישה (לא חובה - "גלישה #N" אם נשאר ריק), המפקדים שאחראים לשבץ, ופעימות
- * היציאה. שמות הפעימות נוצרים אוטומטית, ותאריך הפרסום הוא רגע הלחיצה על הכפתור.
+ * שם הגלישה (חובה), המפקדים שאחראים לשבץ, ופעימות היציאה. שמות הפעימות
+ * נגזרים אוטומטית כברירת מחדל אבל ניתנים לעריכה, ותאריך הפרסום הוא רגע
+ * הלחיצה על הכפתור.
  */
 export function CreateTripPage() {
   const navigate = useNavigate();
@@ -28,6 +31,8 @@ export function CreateTripPage() {
   const [cycles, setCycles] = useState<CycleDraft[]>([emptyCycle()]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // מסומן אחרי ניסיון שליחה - מציג שדות חובה ריקים באדום (ראו Field).
+  const [attempted, setAttempted] = useState(false);
 
   const leaders = options.data?.leaders ?? [];
   const filtered = useMemo(() => {
@@ -40,8 +45,8 @@ export function CreateTripPage() {
     setSelected((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
 
   /**
-   * הפעימות מסודרות לפי תאריך היציאה, כי מזה נגזרים השמות בשרת: מי שיוצא
-   * ראשון הוא החלוץ. שורות בלי תאריך נשארות בסוף עד שימולאו.
+   * הפעימות מסודרות לפי תאריך היציאה, כי מזה נגזר ברירת המחדל של השם בשרת:
+   * מי שיוצא ראשון הוא החלוץ. שורות בלי תאריך נשארות בסוף עד שימולאו.
    */
   const ordered = useMemo(() => {
     const withDate = cycles.filter((cycle) => cycle.exitDate);
@@ -49,8 +54,8 @@ export function CreateTripPage() {
     withDate.sort((a, b) => a.exitDate.localeCompare(b.exitDate));
     return [...withDate, ...withoutDate].map((cycle, index) => ({
       ...cycle,
-      // השם מוצג רק לשורות שיש להן תאריך - אחרת מקומן בסדר עוד לא ידוע.
-      name: cycle.exitDate ? cycleName(index) : null,
+      // ברירת המחדל מוצגת רק לשורות שיש להן תאריך - אחרת מקומן בסדר עוד לא ידוע.
+      defaultName: cycle.exitDate ? cycleName(index) : null,
     }));
   }, [cycles]);
 
@@ -59,10 +64,17 @@ export function CreateTripPage() {
 
   const removeCycle = (key: number) => setCycles((current) => current.filter((cycle) => cycle.key !== key));
 
+  const nameInvalid = attempted && !name.trim();
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+    setAttempted(true);
 
+    if (!name.trim()) {
+      setError('יש להזין שם לגלישה');
+      return;
+    }
     if (selected.length === 0) {
       setError('יש לבחור לפחות מפקד אחד שישבץ אנשים');
       return;
@@ -75,9 +87,12 @@ export function CreateTripPage() {
     setBusy(true);
     try {
       const result = await api.post<{ trip: Trip }>('/trips', {
-        ...(name.trim() ? { name: name.trim() } : {}),
+        name: name.trim(),
         leaderIds: selected,
-        cycles: filled.map((cycle) => ({ exitDate: cycle.exitDate })),
+        cycles: filled.map((cycle) => ({
+          exitDate: cycle.exitDate,
+          ...(cycle.name.trim() ? { name: cycle.name.trim() } : {}),
+        })),
       });
       navigate(`/manage/${result.trip.id}`);
     } catch (caught) {
@@ -102,12 +117,19 @@ export function CreateTripPage() {
       <form onSubmit={submit}>
         <Alert kind="error">{error}</Alert>
         <Alert kind="info">
-          שמות הפעימות נגזרים מסדר היציאה: הפעימה שיוצאת ראשונה היא החלוץ, ואחריה פעימה 1, פעימה 2 וכן הלאה.
+          כברירת מחדל שמות הפעימות נגזרים מסדר היציאה: הפעימה שיוצאת ראשונה היא החלוץ, ואחריה פעימה 1, פעימה 2 וכן
+          הלאה - אפשר לתת שם משלך לכל פעימה.
         </Alert>
 
         <Card title="שם הגלישה">
-          <Field label="שם הגלישה" hint={`לא חובה - אם נשאר ריק, השם יהיה "גלישה #N" אוטומטית`}>
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="לדוגמה: גלישת גיבוש קיץ" />
+          <Field label="שם הגלישה" invalid={nameInvalid}>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="לדוגמה: גלישת גיבוש קיץ"
+              required
+              autoFocus
+            />
           </Field>
         </Card>
 
@@ -121,21 +143,25 @@ export function CreateTripPage() {
         >
           <div className="stack">
             {ordered.map((cycle) => (
-              <div key={cycle.key} className="field-row field-row--end">
-                <Field label="פעימה">
-                  {cycle.name ? (
-                    <Badge kind={cycle.name === 'חלוץ' ? 'info' : 'default'}>{cycle.name}</Badge>
-                  ) : (
-                    <span className="muted small">נקבע לפי תאריך היציאה</span>
-                  )}
-                </Field>
-                <Field label="תאריך יציאה">
-                  <input
-                    type="date"
+              <div key={cycle.key} className="row" style={{ alignItems: 'end' }}>
+                <div className="field-row field-row--pair" style={{ flex: 1 }}>
+                  <DateField
+                    label="תאריך יציאה"
                     value={cycle.exitDate}
-                    onChange={(event) => updateCycle(cycle.key, { exitDate: event.target.value })}
+                    onChange={(iso) => updateCycle(cycle.key, { exitDate: iso })}
+                    required
                   />
-                </Field>
+                  <Field
+                    label="שם הפעימה"
+                    hint={cycle.defaultName ? `ברירת מחדל: ${cycle.defaultName}` : 'ייקבע לפי תאריך היציאה'}
+                  >
+                    <input
+                      value={cycle.name}
+                      onChange={(event) => updateCycle(cycle.key, { name: event.target.value })}
+                      placeholder={cycle.defaultName ?? ''}
+                    />
+                  </Field>
+                </div>
                 <button
                   type="button"
                   className="btn btn--sm btn--danger"

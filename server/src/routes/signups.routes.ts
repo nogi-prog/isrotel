@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db, plain, tx } from '../db/index.ts';
-import { requireApproved, requireAuth, requireUser } from '../lib/auth.ts';
+import { requireApproved, requireAuth, requireTO, requireUser } from '../lib/auth.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { fullName, getUser, isAncestorOf, subordinateIds, unitPath } from '../lib/org.ts';
 import { notify, notifyMany } from '../lib/notify.ts';
@@ -500,7 +500,11 @@ signupsRouter.post('/:id/signups', (req, res) => {
   res.status(201).json({ added: added.length, skipped, status });
 });
 
-/** הסרת אדם מהגלישה על ידי המפקד ששיבץ אותו (או מפקד מעליו). */
+/**
+ * הסרת אדם מהגלישה על ידי המפקד ששיבץ אותו (או מפקד מעליו) - או האופרטיבי,
+ * שסוקר את מי שהמפקדים שיבצו ורשאי להסיר כל אחד, גם מחוץ לשרשרת הפיקוד שלו
+ * (ראו ParticipantsTab ב-OrganizerTripPage - "אישור" הרשימה).
+ */
 signupsRouter.delete('/:id/signups/:signupId', (req, res) => {
   const manager = requireUser(req);
   const trip = getTripOr404(idParam.parse(req.params.id));
@@ -511,7 +515,7 @@ signupsRouter.delete('/:id/signups/:signupId', (req, res) => {
   if (!row) throw notFound('השיבוץ לא נמצא');
   const signup = plain<SignupRow>(row);
 
-  assertCanSign(trip, manager, signup.user_id);
+  if (manager.role !== 'to') assertCanSign(trip, manager, signup.user_id);
   const target = getUser(db, signup.user_id);
 
   tx(() => {
@@ -528,6 +532,69 @@ signupsRouter.delete('/:id/signups/:signupId', (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+// --- אישור האופרטיבי --------------------------------------------------------
+// שכבה נוספת מעל אישור המפקד (status='approved'): עד שהאופרטיבי מאשר, האדם
+// לא נכנס לשיבוץ אוטובוסים/לינה ולא נספר בדוח המזון - ראו loadCycleParticipants.
+
+/** אישור בודד - האופרטיבי מאשר שיבוץ אחד שהמפקד כבר אישר. */
+signupsRouter.post('/:id/signups/:signupId/to-approve', requireTO, (req, res) => {
+  const to = requireUser(req);
+  const trip = getTripOr404(idParam.parse(req.params.id));
+  const signupId = idParam.parse(req.params.signupId);
+
+  const row = db.prepare('SELECT * FROM signups WHERE id = ? AND trip_id = ?').get(signupId, trip.id);
+  if (!row) throw notFound('השיבוץ לא נמצא');
+  const signup = plain<SignupRow>(row);
+  if (signup.status !== 'approved') throw badRequest('אפשר לאשר רק שיבוץ שהמפקד כבר אישר');
+  if (signup.to_approved_at != null) throw badRequest('השיבוץ כבר אושר');
+
+  const target = getUser(db, signup.user_id);
+
+  tx(() => {
+    db.prepare(`UPDATE signups SET to_approved_by = ?, to_approved_at = ${NOW_MS} WHERE id = ?`).run(to.id, signup.id);
+    if (target) {
+      notify(db, {
+        userId: target.id,
+        kind: 'to_approved',
+        title: `השיבוץ שלך לגלישה ${trip.name} אושר סופית`,
+        body: `${fullName(to)} אישר את השיבוץ שלך.`,
+        link: `/trips/${trip.id}`,
+      });
+    }
+  });
+
+  res.json({ ok: true });
+});
+
+/** אישור מרוכז - כל מי שהמפקדים אישרו בפעימה מסוימת ועדיין ממתין לאישור האופרטיבי. */
+signupsRouter.post('/:id/cycles/:cycleId/to-approve-all', requireTO, (req, res) => {
+  const to = requireUser(req);
+  const trip = getTripOr404(idParam.parse(req.params.id));
+  const cycle = getCycleOr404(trip.id, idParam.parse(req.params.cycleId));
+
+  const pending = db
+    .prepare(`SELECT id, user_id FROM signups WHERE cycle_id = ? AND status = 'approved' AND to_approved_at IS NULL`)
+    .all(cycle.id) as Array<{ id: number; user_id: number }>;
+
+  tx(() => {
+    const approve = db.prepare(`UPDATE signups SET to_approved_by = ?, to_approved_at = ${NOW_MS} WHERE id = ?`);
+    for (const row of pending) approve.run(to.id, row.id);
+
+    notifyMany(
+      db,
+      pending.map((row) => row.user_id),
+      {
+        kind: 'to_approved',
+        title: `השיבוץ שלך לגלישה ${trip.name} אושר סופית`,
+        body: `${fullName(to)} אישר את השיבוץ שלך.`,
+        link: `/trips/${trip.id}`,
+      },
+    );
+  });
+
+  res.json({ ok: true, approved: pending.length });
 });
 
 // --- הגשת הרשימה על ידי המפקד ---------------------------------------------

@@ -4,7 +4,6 @@ import { api, type Notification } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { ROLE_LABEL } from '../lib/he';
 import { NOTIFICATIONS_READ_EVENT } from '../lib/notifications';
-import { Badge } from './ui';
 import { ThemeToggle } from './ThemeToggle';
 import { ContactDropdown } from './ContactDropdown';
 
@@ -15,6 +14,16 @@ function navClass({ isActive }: { isActive: boolean }): string {
 /** תמיד true/false בלי קשר לחישוב ההתאמה של NavLink - ראו השימוש למטה. */
 function forcedNavClass(active: boolean): string {
   return active ? 'navlink navlink--active' : 'navlink';
+}
+
+/** ראשי התיבות של שם מלא, לתצוגה בבועת הפרופיל בסרגל - עד שתי אותיות. */
+function initials(fullName: string): string {
+  const letters = fullName
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean);
+  return letters.slice(0, 2).join('');
 }
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -70,6 +79,11 @@ export function Layout({ children }: { children: ReactNode }) {
               אישורים
             </NavLink>
           )}
+          {user.isManager && (
+            <NavLink to="/my-team" className={navClass}>
+              חיילים
+            </NavLink>
+          )}
           {user.isTripOrganizer && (
             <NavLink
               to="/manage"
@@ -83,24 +97,37 @@ export function Layout({ children }: { children: ReactNode }) {
               איפוס סיסמאות
             </NavLink>
           )}
-          <NavLink to="/profile" className={navClass}>
-            פרופיל
-          </NavLink>
-          <NavLink to="/notifications" className={navClass}>
-            התראות {unread > 0 && <Badge kind="danger">{unread}</Badge>}
-          </NavLink>
         </nav>
 
         <div className="topbar__icons">
+          <Link
+            to="/notifications"
+            className="btn btn--sm btn--ghost topbar__icon-btn"
+            aria-label={unread > 0 ? `התראות - ${unread} שלא נקראו` : 'התראות'}
+            title="התראות"
+          >
+            <span aria-hidden>🔔</span>
+            {unread > 0 && (
+              <span className="topbar__icon-badge" aria-hidden>
+                {unread}
+              </span>
+            )}
+          </Link>
           <ThemeToggle />
           <ContactDropdown />
         </div>
 
         <div className="topbar__user">
-          <span>
-            <strong>{user.fullName}</strong> · {ROLE_LABEL[user.role]}
-            {user.unitName ? ` · ${user.unitName}` : user.teamName ? ` · ${user.teamName}` : ''}
-          </span>
+          <Link
+            to="/profile"
+            className="topbar__avatar"
+            aria-label="פרופיל"
+            title={`${user.fullName} · ${ROLE_LABEL[user.role]}${
+              user.unitName ? ` · ${user.unitName}` : user.teamName ? ` · ${user.teamName}` : ''
+            }`}
+          >
+            {initials(user.fullName)}
+          </Link>
           <button type="button" className="btn btn--sm" onClick={signOut}>
             יציאה
           </button>
