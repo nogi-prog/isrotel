@@ -253,7 +253,7 @@ usersRouter.put('/me/car-plate', requireApproved, (req, res) => {
   res.json({ carPlate: parsed.data.carPlate });
 });
 
-// --- עובדים-לשעבר: מושאלים (הצ״ח) ומילואים --------------------------------
+// --- חיילים-לשעבר: מושאלים (הצ״ח) ומילואים --------------------------------
 
 const exWorkerSchema = z
   .object({
@@ -263,21 +263,21 @@ const exWorkerSchema = z
     gender: z.enum(['male', 'female']),
     diet: z.enum(['all', 'vegetarian', 'vegan']),
     workerType: z.enum(['borrowed', 'reserve']),
-    borrowedFrom: z.string().trim().min(2, 'יש לציין מאיפה הושאל העובד').max(80).optional(),
+    borrowedFrom: z.string().trim().min(2, 'יש לציין מאיפה הושאל החייל').max(80).optional(),
     borrowedMission: z.string().trim().min(2, 'יש לציין את המשימה שבשבילה מבקשים את ההשאלה').max(200).optional(),
   })
   .refine((value) => value.workerType !== 'borrowed' || !!value.borrowedFrom, {
-    message: 'לעובד מושאל (הצ״ח) חובה לציין מאיפה הושאל',
+    message: 'לחייל מושאל (הצ״ח) חובה לציין מאיפה הושאל',
     path: ['borrowedFrom'],
   })
   .refine((value) => value.workerType !== 'borrowed' || !!value.borrowedMission, {
-    message: 'לעובד מושאל (הצ״ח) חובה לציין את המשימה שבשבילה מבקשים את ההשאלה',
+    message: 'לחייל מושאל (הצ״ח) חובה לציין את המשימה שבשבילה מבקשים את ההשאלה',
     path: ['borrowedMission'],
   });
 
 /**
- * הוספת עובד-לשעבר (מושאל מיחידה אחרת - הצ״ח, או מילואים) ישירות תחת מפקד.
- * בניגוד להרשמה רגילה אין כאן תהליך אישור: המפקד שמוסיף כבר ערב לזהות העובד,
+ * הוספת חייל-לשעבר (מושאל מיחידה אחרת - הצ״ח, או מילואים) ישירות תחת מפקד.
+ * בניגוד להרשמה רגילה אין כאן תהליך אישור: המפקד שמוסיף כבר ערב לזהות החייל,
  * ולכן הוא מצטרף מאושר ומיד תחתיו, בדיוק כמו חייל רגיל - גלישות, אוטובוסים
  * ולינה מתייחסים אליו זהה, ורק מסכי הצוות מציגים אותו בסעיף נפרד (worker_type).
  * זמין לכל מפקד: לפי PARENT_ROLES חייל יכול להיות כפוף ישירות לכל דרג מפקד.
@@ -285,7 +285,7 @@ const exWorkerSchema = z
 usersRouter.post('/ex-workers', requireApproved, (req, res) => {
   const manager = requireUser(req);
   if (!isManagerRole(manager.role)) {
-    throw forbidden('רק מפקד יכול להוסיף עובד מושאל או מילואים לצוות');
+    throw forbidden('רק מפקד יכול להוסיף חייל מושאל או מילואים לצוות');
   }
 
   const parsed = exWorkerSchema.safeParse(req.body);
@@ -328,7 +328,7 @@ usersRouter.post('/ex-workers', requireApproved, (req, res) => {
       title: 'התווספת למערכת',
       body:
         input.workerType === 'borrowed'
-          ? `${fullName(manager)} הוסיף אותך לצוות כעובד מושאל (הצ״ח) מ${input.borrowedFrom}.`
+          ? `${fullName(manager)} הוסיף אותך לצוות כחייל מושאל (הצ״ח) מ${input.borrowedFrom}.`
           : `${fullName(manager)} הוסיף אותך לצוות כאיש מילואים.`,
       link: '/',
     });
@@ -354,22 +354,22 @@ const profileEditSchema = z
     allergies: z.string().trim().max(200).optional(),
     /** רלוונטי לחיילים בלבד (users.worker_type) - ראו deriveWorkerType למטה. */
     workerType: z.enum(['regular', 'borrowed', 'reserve']).optional(),
-    borrowedFrom: z.string().trim().min(2, 'יש לציין מאיפה הושאל העובד').max(80).optional(),
+    borrowedFrom: z.string().trim().min(2, 'יש לציין מאיפה הושאל החייל').max(80).optional(),
     borrowedMission: z.string().trim().min(2, 'יש לציין את המשימה שבשבילה מבקשים את ההשאלה').max(200).optional(),
   })
   .refine((value) => value.workerType !== 'borrowed' || !!value.borrowedFrom, {
-    message: 'לעובד מושאל (הצ״ח) חובה לציין מאיפה הושאל',
+    message: 'לחייל מושאל (הצ״ח) חובה לציין מאיפה הושאל',
     path: ['borrowedFrom'],
   })
   .refine((value) => value.workerType !== 'borrowed' || !!value.borrowedMission, {
-    message: 'לעובד מושאל (הצ״ח) חובה לציין את המשימה שבשבילה מבקשים את ההשאלה',
+    message: 'לחייל מושאל (הצ״ח) חובה לציין את המשימה שבשבילה מבקשים את ההשאלה',
     path: ['borrowedMission'],
   });
 
 type ProfileEditInput = z.infer<typeof profileEditSchema>;
 
 /**
- * סוג העובד ניתן לעריכה עצמית לחיילים בלבד (worker_type - ראו types.ts):
+ * סוג החייל ניתן לעריכה עצמית לחיילים בלבד (worker_type - ראו types.ts):
  * מפקד תמיד נשאר 'regular'. כשלא נשלח ערך (למשל מפקד עורך את עצמו, או טופס
  * שלא כלל את השדה) נשמר הערך הנוכחי - כדי שעדכון שם/תזונה לא יאפס בטעות
  * מעמד "מושאל"/"מילואים" קיים.

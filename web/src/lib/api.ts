@@ -123,7 +123,7 @@ export type CarStatus = 'none' | 'pending' | 'approved' | 'rejected';
  */
 export type Role = 'employee' | 'team_leader' | 'sector_leader' | 'division_leader' | 'to' | 'ceo';
 
-/** עובד רגיל, מושאל מיחידה אחרת (הצ״ח, ראו borrowedFrom) או מילואים. */
+/** חייל רגיל, מושאל מיחידה אחרת (הצ״ח, ראו borrowedFrom) או מילואים. */
 export type WorkerType = 'regular' | 'borrowed' | 'reserve';
 
 export interface CurrentUser {

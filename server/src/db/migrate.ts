@@ -239,7 +239,7 @@ export function migrate(db: Db): void {
     console.log('[migrate] users.car_plate נוסף');
   }
 
-  // עובדים-לשעבר: מושאל (הצ״ח) או מילואים - ראו ההסבר ב-schema.sql וב-POST /users/ex-workers.
+  // חיילים-לשעבר: מושאל (הצ״ח) או מילואים - ראו ההסבר ב-schema.sql וב-POST /users/ex-workers.
   if (tableExists(db, 'users') && !columns(db, 'users').has('worker_type')) {
     db.exec(
       `ALTER TABLE users ADD COLUMN worker_type TEXT NOT NULL DEFAULT 'regular'
@@ -249,7 +249,7 @@ export function migrate(db: Db): void {
     console.log('[migrate] users.worker_type ו-borrowed_from נוספו');
   }
 
-  // המשימה שבשבילה מבקשים את ההשאלה של עובד מושאל (הצ״ח) - ראו ההסבר ב-schema.sql.
+  // המשימה שבשבילה מבקשים את ההשאלה של חייל מושאל (הצ״ח) - ראו ההסבר ב-schema.sql.
   if (tableExists(db, 'users') && !columns(db, 'users').has('borrowed_mission')) {
     db.exec('ALTER TABLE users ADD COLUMN borrowed_mission TEXT');
     console.log('[migrate] users.borrowed_mission נוסף');

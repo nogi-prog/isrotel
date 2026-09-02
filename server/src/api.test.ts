@@ -2864,8 +2864,8 @@ describe('API מקצה לקצה', () => {
     });
   });
 
-  describe('עובדים-לשעבר: מושאלים (הצ״ח) ומילואים', () => {
-    test('ר״צ מוסיף עובד מושאל, מאושר מיד וכפוף אליו ישירות', async () => {
+  describe('חיילים-לשעבר: מושאלים (הצ״ח) ומילואים', () => {
+    test('ר״צ מוסיף חייל מושאל, מאושר מיד וכפוף אליו ישירות', async () => {
       const teamLeaderToken = await login('1000004');
 
       const missingOrigin = await api('POST', '/api/users/ex-workers', {
@@ -2931,11 +2931,11 @@ describe('API מקצה לקצה', () => {
 
       const team = await api('GET', '/api/users/my-team', { token: teamLeaderToken });
       const inTeam = team.body.team.find((member: any) => member.companyId === '5900001');
-      assert.ok(inTeam, 'העובד המושאל לא מופיע בצוות של הר״צ');
+      assert.ok(inTeam, 'החייל המושאל לא מופיע בצוות של הר״צ');
       assert.equal(inTeam.workerType, 'borrowed');
     });
 
-    test('איש מילואים אינו דורש מקור, ורק מפקד יכול להוסיף עובד-לשעבר', async () => {
+    test('איש מילואים אינו דורש מקור, ורק מפקד יכול להוסיף חייל-לשעבר', async () => {
       const teamLeaderToken = await login('1000004');
       const soldierToken = await login('2000001');
 
@@ -3060,12 +3060,12 @@ describe('API מקצה לקצה', () => {
       assert.ok(mainSheet, 'הגיליון הראשי לא נמצא');
       const mainText = flatten(mainSheet!);
       assert.match(mainText, /,רגיל,/, 'החייל הרגיל אמור להופיע עם מעמד רגיל');
-      assert.match(mainText, /,הצח,/, 'העובד המושאל אמור להופיע עם מעמד הצח');
+      assert.match(mainText, /,הצח,/, 'החייל המושאל אמור להופיע עם מעמד הצח');
 
       const borrowedSheet = workbook.getWorksheet('הצחים');
       assert.ok(borrowedSheet, 'גיליון ההצחים לא נוצר');
       const borrowedText = flatten(borrowedSheet!);
-      assert.match(borrowedText, /גל שרון/, 'שם העובד המושאל');
+      assert.match(borrowedText, /גל שרון/, 'שם החייל המושאל');
       assert.match(borrowedText, /מדור תשתיות/, 'מאיפה הושאל');
       assert.match(borrowedText, /צוות אלון/, 'לאן ההצח - הצוות שאליו הצטרף');
       assert.match(borrowedText, /תגבור לפרויקט Y עד סוף הרבעון/, 'המשימה');
@@ -3129,7 +3129,7 @@ describe('API מקצה לקצה', () => {
 
       // עוד לפני שדווח על אף אחד - כולם מופיעים עם has_shift=false. הצוות
       // עצמו לא נבדק במספר מדויק (טסטים קודמים בקובץ יכלו להוסיף לו כפיפים
-      // נוספים - למשל העובדים-לשעבר שנוספו למעלה), אלא שהחיילים המקוריים
+      // נוספים - למשל החיילים-לשעבר שנוספו למעלה), אלא שהחיילים המקוריים
       // ועצמו בהחלט מופיעים.
       const mineEmpty = await api('GET', `/api/trips/${shiftTripId}/shift-reports/mine`, { token: teamLeaderToken });
       assert.equal(mineEmpty.status, 200, JSON.stringify(mineEmpty.body));

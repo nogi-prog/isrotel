@@ -130,7 +130,7 @@ export function ProfilePage() {
     );
   }, [teamList, teamSearch]);
 
-  // עובדים-לשעבר (מושאלים ומילואים) מוצגים בסעיפים נפרדים מעובדים רגילים.
+  // חיילים-לשעבר (מושאלים ומילואים) מוצגים בסעיפים נפרדים מחיילים רגילים.
   const teamRegular = useMemo(() => teamFiltered.filter((member) => member.workerType === 'regular'), [teamFiltered]);
   const teamBorrowed = useMemo(
     () => teamFiltered.filter((member) => member.workerType === 'borrowed'),
@@ -180,7 +180,7 @@ export function ProfilePage() {
       return;
     }
     if (isBorrowed && (borrowedFromInvalid || borrowedMissionInvalid)) {
-      setFormError('לעובד מושאל (הצ״ח) חובה למלא מאיפה הושאל ומהי המשימה');
+      setFormError('לחייל מושאל (הצ״ח) חובה למלא מאיפה הושאל ומהי המשימה');
       return;
     }
     if (plateInvalid) {
@@ -342,7 +342,7 @@ export function ProfilePage() {
 
             {isEmployee && (
               <>
-                <Field label="סוג עובד">
+                <Field label="סוג חייל">
                   <select value={workerType} onChange={(event) => setWorkerType(event.target.value as WorkerType)}>
                     {(['regular', 'borrowed', 'reserve'] as WorkerType[]).map((option) => (
                       <option key={option} value={option}>
@@ -438,7 +438,7 @@ export function ProfilePage() {
             <InfoRow label="העדפת תזונה" value={DIET_LABEL[user.diet] ?? user.diet} />
             <InfoRow label="אלרגיות" value={user.allergies} />
             {user.unitName && <InfoRow label="יחידה" value={user.unitName} />}
-            {isEmployee && <InfoRow label="סוג עובד" value={WORKER_TYPE_LABEL[user.workerType] ?? user.workerType} />}
+            {isEmployee && <InfoRow label="סוג חייל" value={WORKER_TYPE_LABEL[user.workerType] ?? user.workerType} />}
             {isEmployee && user.workerType === 'borrowed' && (
               <>
                 <InfoRow label="מאיפה הושאל" value={user.borrowedFrom ?? '—'} />
@@ -479,7 +479,7 @@ export function ProfilePage() {
             <Stat value={teamStats.special} label="תזונה מיוחדת" />
           </div>
 
-          <Card title={user.isTripOrganizer ? 'כל אנשי החברה' : 'העובדים שלי'}>
+          <Card title={user.isTripOrganizer ? 'כל אנשי החברה' : 'החיילים שלי'}>
             <Alert kind="error">{team.error}</Alert>
             {team.loading ? (
               <Loading />
@@ -509,7 +509,7 @@ export function ProfilePage() {
 
           {(canAddExWorkers || teamBorrowed.length > 0) && (
             <Card
-              title="עובדים מושאלים (הצ״ח)"
+              title="חיילים מושאלים (הצ״ח)"
               actions={
                 canAddExWorkers ? (
                   <AddExWorkerToggle workerType="borrowed" onAdded={() => void team.reload()} />
@@ -517,7 +517,7 @@ export function ProfilePage() {
               }
             >
               {teamBorrowed.length === 0 ? (
-                <Empty>אין עובדים מושאלים כרגע.</Empty>
+                <Empty>אין חיילים מושאלים כרגע.</Empty>
               ) : (
                 <TeamTable
                   members={teamBorrowed}
@@ -1203,7 +1203,7 @@ function TeamTable({
   );
 }
 
-/** כפתור שפותח וסוגר את טופס הוספת עובד-לשעבר, בלי להזדקק ל-state בעמוד עצמו. */
+/** כפתור שפותח וסוגר את טופס הוספת חייל-לשעבר, בלי להזדקק ל-state בעמוד עצמו. */
 function AddExWorkerToggle({ workerType, onAdded }: { workerType: WorkerType; onAdded: () => void }) {
   const [open, setOpen] = useState(false);
 
@@ -1224,13 +1224,13 @@ function AddExWorkerToggle({ workerType, onAdded }: { workerType: WorkerType; on
 
   return (
     <button type="button" className="btn btn--sm btn--primary" onClick={() => setOpen(true)}>
-      {workerType === 'borrowed' ? 'הוספת עובד מושאל' : 'הוספת איש מילואים'}
+      {workerType === 'borrowed' ? 'הוספת חייל מושאל' : 'הוספת איש מילואים'}
     </button>
   );
 }
 
 /**
- * הוספת עובד-לשעבר (מושאל או מילואים) ישירות לצוות - ראו POST
+ * הוספת חייל-לשעבר (מושאל או מילואים) ישירות לצוות - ראו POST
  * /users/ex-workers בשרת. זמין רק לר״צ, ולכן העמוד מציג אותו רק לו.
  * בניגוד להרשמה רגילה הוא מצטרף מאושר מיד, בלי אישור נוסף.
  */
@@ -1269,7 +1269,7 @@ function AddExWorkerForm({
       });
       onAdded();
     } catch (caught) {
-      setError(errorMessage(caught, 'הוספת העובד נכשלה'));
+      setError(errorMessage(caught, 'הוספת החייל נכשלה'));
     } finally {
       setBusy(false);
     }
@@ -1447,7 +1447,7 @@ function EditMemberForm({
       return;
     }
     if (isBorrowed && (borrowedFromInvalid || borrowedMissionInvalid)) {
-      setError('לעובד מושאל (הצ״ח) חובה למלא מאיפה הושאל ומהי המשימה');
+      setError('לחייל מושאל (הצ״ח) חובה למלא מאיפה הושאל ומהי המשימה');
       return;
     }
     if (managerChanged && member.hasDirectReports && !successor) {
@@ -1548,7 +1548,7 @@ function EditMemberForm({
 
       {isEmployee && (
         <>
-          <Field label="סוג עובד">
+          <Field label="סוג חייל">
             <select value={workerType} onChange={(event) => setWorkerType(event.target.value as WorkerType)}>
               {(['regular', 'borrowed', 'reserve'] as WorkerType[]).map((option) => (
                 <option key={option} value={option}>

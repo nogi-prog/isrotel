@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS users (
   -- מספר רכב, 7-8 ספרות: רת״ח ומפמ״ר תמיד מגיעים ברכב הפרטי שלהם, ושולטים
   -- בשדה הזה בעצמם בפרופיל - ראו lib/cars.ts.
   car_plate    TEXT    CHECK (car_plate IS NULL OR (length(car_plate) BETWEEN 7 AND 8 AND car_plate NOT GLOB '*[^0-9]*')),
-  -- עובד-לשעבר: מושאל (הצ״ח, מגיע מיחידה אחרת - ראו borrowed_from) או
-  -- מילואים. עובד רגיל הוא 'regular'. ראו POST /users/ex-workers.
+  -- חייל-לשעבר: מושאל (הצ״ח, מגיע מיחידה אחרת - ראו borrowed_from) או
+  -- מילואים. חייל רגיל הוא 'regular'. ראו POST /users/ex-workers.
   worker_type      TEXT    NOT NULL DEFAULT 'regular' CHECK (worker_type IN ('regular', 'borrowed', 'reserve')),
   borrowed_from    TEXT,
   -- המשימה שבשבילה מבקשים את ההשאלה - רלוונטי רק כש-worker_type = 'borrowed'.
