@@ -184,6 +184,8 @@ export interface UserRow {
   diet: Diet;
   manager_id: number | null;
   unit_name: string | null;
+  phone: string | null;
+  allergies: string;
   car_plate: string | null;
   worker_type: WorkerType;
   borrowed_from: string | null;
@@ -222,6 +224,11 @@ export interface ProfileEditRow {
   gender: Gender;
   diet: Diet;
   unit_name: string | null;
+  phone: string | null;
+  allergies: string;
+  worker_type: WorkerType;
+  borrowed_from: string | null;
+  borrowed_mission: string | null;
   status: UserStatus;
   decided_by: number | null;
   decided_at: string | null;
@@ -356,6 +363,8 @@ export interface PublicUser {
   managerId: number | null;
   managerName: string | null;
   unitName: string | null;
+  phone: string | null;
+  allergies: string;
   status: UserStatus;
   rankGroup: RankGroup;
   sectorId: number | null;

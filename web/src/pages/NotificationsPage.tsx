@@ -1,18 +1,28 @@
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Notification } from '../lib/api';
 import { useApi } from '../lib/useApi';
 import { formatDateTime } from '../lib/he';
 import { Alert, Card, Empty, Loading } from '../components/ui';
+import { NOTIFICATIONS_READ_EVENT } from '../lib/notifications';
 
 export function NotificationsPage() {
   const { data, loading, error, reload } = useApi<{ unread: number; notifications: Notification[] }>(
     '/notifications',
   );
 
-  const markAll = async () => {
-    await api.post('/notifications/read-all');
-    await reload();
-  };
+  // ברגע שהמשתמש רואה את הרשימה היא נחשבת "נקראה" - אין צורך בלחיצה נוספת.
+  // ה-ref מונע קריאה כפולה (למשל ב-StrictMode) כל עוד לא נטענו התראות חדשות.
+  const clearedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!data || data.unread === 0 || clearedFor.current === data.unread) return;
+    clearedFor.current = data.unread;
+    void (async () => {
+      await api.post('/notifications/read-all');
+      window.dispatchEvent(new Event(NOTIFICATIONS_READ_EVENT));
+      await reload();
+    })();
+  }, [data, reload]);
 
   if (loading) return <Loading />;
 
@@ -25,11 +35,6 @@ export function NotificationsPage() {
           <h1>התראות</h1>
           <p>{data?.unread ? `${data.unread} התראות שלא נקראו` : 'הכל נקרא'}</p>
         </div>
-        {(data?.unread ?? 0) > 0 && (
-          <button type="button" className="btn btn--sm" onClick={() => void markAll()}>
-            סמן הכל כנקרא
-          </button>
-        )}
       </div>
 
       <Alert kind="error">{error}</Alert>

@@ -266,6 +266,36 @@ export function migrate(db: Db): void {
     console.log('[migrate] users.password_hash ו-must_change_password נוספו');
   }
 
+  // טלפון ואלרגיות - ראו ההסבר ב-schema.sql. אלרגיות בברירת מחדל 'ללא'
+  // גם למשתמשים קיימים, כדי שלא יישארו ריקים בדוחות.
+  if (tableExists(db, 'users') && !columns(db, 'users').has('phone')) {
+    db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
+    console.log('[migrate] users.phone נוסף');
+  }
+  if (tableExists(db, 'users') && !columns(db, 'users').has('allergies')) {
+    db.exec("ALTER TABLE users ADD COLUMN allergies TEXT NOT NULL DEFAULT 'ללא'");
+    console.log('[migrate] users.allergies נוסף');
+  }
+
+  // אותם שדות בבקשות עדכון פרופיל - ראו ההסבר ב-schema.sql.
+  if (tableExists(db, 'profile_edits') && !columns(db, 'profile_edits').has('phone')) {
+    db.exec('ALTER TABLE profile_edits ADD COLUMN phone TEXT');
+    console.log('[migrate] profile_edits.phone נוסף');
+  }
+  if (tableExists(db, 'profile_edits') && !columns(db, 'profile_edits').has('allergies')) {
+    db.exec("ALTER TABLE profile_edits ADD COLUMN allergies TEXT NOT NULL DEFAULT 'ללא'");
+    console.log('[migrate] profile_edits.allergies נוסף');
+  }
+  if (tableExists(db, 'profile_edits') && !columns(db, 'profile_edits').has('worker_type')) {
+    db.exec(
+      `ALTER TABLE profile_edits ADD COLUMN worker_type TEXT NOT NULL DEFAULT 'regular'
+         CHECK (worker_type IN ('regular', 'borrowed', 'reserve'))`,
+    );
+    db.exec('ALTER TABLE profile_edits ADD COLUMN borrowed_from TEXT');
+    db.exec('ALTER TABLE profile_edits ADD COLUMN borrowed_mission TEXT');
+    console.log('[migrate] profile_edits.worker_type/borrowed_from/borrowed_mission נוספו');
+  }
+
   // פירוט תורנות - ראו ההסבר ב-schema.sql.
   if (tableExists(db, 'shift_reports') && !columns(db, 'shift_reports').has('duty_type')) {
     db.exec('ALTER TABLE shift_reports ADD COLUMN duty_type TEXT');

@@ -138,6 +138,9 @@ export interface CurrentUser {
   managerId: number | null;
   managerName: string | null;
   unitName: string | null;
+  phone: string | null;
+  /** אלרגיות מזון - 'ללא' כברירת מחדל כשלא הוזן. */
+  allergies: string;
   status: 'pending' | 'approved' | 'rejected';
   /** חייל, או דרג ניהולי מסוים בדיוק - כל דרג ישן רק עם בני אותו דרג. */
   rankGroup: 'soldier' | Exclude<Role, 'employee'>;
@@ -394,6 +397,20 @@ export interface PendingRegistration extends CurrentUser {
   createdAt: string;
 }
 
+/** השדות שמושווים בבקשת עדכון פרופיל - ראו ProfileEditRequest למטה. */
+export interface ProfileEditFields {
+  firstName: string;
+  lastName: string;
+  gender: Gender;
+  diet: Diet;
+  unitName: string | null;
+  phone: string | null;
+  allergies: string;
+  workerType: WorkerType;
+  borrowedFrom: string | null;
+  borrowedMission: string | null;
+}
+
 /**
  * בקשת עדכון פרופיל - שינוי בפרטים אישיים שממתין לאישור המפקד, בדיוק כמו
  * הרשמה ראשונית. `current` ו־`proposed` מאפשרים להציג השוואה בין הערכים.
@@ -403,8 +420,8 @@ export interface ProfileEditRequest {
   userId: number;
   userFullName: string;
   companyId: string;
-  current: { firstName: string; lastName: string; gender: Gender; diet: Diet; unitName: string | null };
-  proposed: { firstName: string; lastName: string; gender: Gender; diet: Diet; unitName: string | null };
+  current: ProfileEditFields;
+  proposed: ProfileEditFields;
   status: 'pending' | 'approved' | 'rejected';
   decisionNote: string | null;
   createdAt: string;
@@ -445,22 +462,6 @@ export interface MoveRequest {
   toManager: { id: number; fullName: string; unitName: string | null };
   successor: { id: number; fullName: string; companyId: string } | null;
   requestedBy: { id: number; fullName: string };
-  status: 'pending' | 'approved' | 'rejected';
-  decisionNote: string | null;
-  createdAt: string;
-}
-
-/**
- * בקשת עדכון פרופיל - שינוי בפרטים אישיים ביוזמת המשתמש עצמו, שממתין לאישור
- * המפקד בדיוק כמו הרשמה ראשונית. `current` ו־`proposed` מאפשרים להציג השוואה.
- */
-export interface ProfileEditRequest {
-  id: number;
-  userId: number;
-  userFullName: string;
-  companyId: string;
-  current: { firstName: string; lastName: string; gender: Gender; diet: Diet; unitName: string | null };
-  proposed: { firstName: string; lastName: string; gender: Gender; diet: Diet; unitName: string | null };
   status: 'pending' | 'approved' | 'rejected';
   decisionNote: string | null;
   createdAt: string;

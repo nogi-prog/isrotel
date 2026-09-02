@@ -114,14 +114,17 @@ export function Stat({ value, label }: { value: ReactNode; label: string }) {
 export function Field({
   label,
   hint,
+  invalid = false,
   children,
 }: {
   label: string;
   hint?: string;
+  /** מסמן את השדה כחסר/שגוי אחרי ניסיון שמירה - ראו .field--invalid ב-styles.css. */
+  invalid?: boolean;
   children: ReactNode;
 }) {
   return (
-    <label className="field">
+    <label className={`field${invalid ? ' field--invalid' : ''}`}>
       <span>{label}</span>
       {children}
       {hint && <span className="field__hint">{hint}</span>}

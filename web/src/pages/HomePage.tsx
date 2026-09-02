@@ -40,6 +40,7 @@ export function HomePage() {
             <Card
               key={trip.id}
               defaultCollapsed
+              className="card--trip"
               title={
                 <div>
                   <h2>{trip.name}</h2>

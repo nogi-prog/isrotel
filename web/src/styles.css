@@ -338,6 +338,27 @@ a {
   margin-bottom: 0.85rem;
 }
 
+/* התוכן שמתאר את הכרטיס מתכווץ ועוטף שורות בעצמו; פעולות הכרטיס (כולל
+   כפתור ההצגה/הסתרה) נשארות צמודות לצד הפוך תמיד ולא "בורחות" לצד השני
+   כשהכותרת עצמה עוטפת שורה - ראו card__head למעלה. */
+.card__head > *:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.card__head > *:last-child {
+  flex-shrink: 0;
+}
+
+/* כרטיסי רשימת גלישות (בית / ניהול גלישות): הכותרת (שם + תאריך + תגית מצב)
+   יכולה להיות ארוכה מספיק כדי לגרום ל-card__head לעטוף שורה - ואז כפתור
+   ההצגה/הסתרה "קופץ" לשורה נפרדת במקום להישאר תמיד באותו צד. ביטול העיטוף
+   כאן משאיר את הכפתור צמוד לכותרת תמיד; הכותרת עצמה עדיין עוטפת טקסט
+   פנימית בזכות min-width: 0 למעלה, רק לא "בורחת" משורת הכותרת עצמה. */
+.card--trip .card__head {
+  flex-wrap: nowrap;
+}
+
 .card__head h2,
 .card__head h3 {
   margin: 0;
@@ -475,6 +496,22 @@ a {
 .field__hint {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+/* שדה חובה שנשאר ריק בניסיון שמירה - ראו Field ב-ui.tsx. */
+.field--invalid > span:first-child {
+  color: var(--danger);
+}
+
+.field--invalid input,
+.field--invalid select,
+.field--invalid textarea {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.field--invalid .field__hint {
+  color: var(--danger);
 }
 
 input,

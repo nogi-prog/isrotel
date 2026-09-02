@@ -19,6 +19,7 @@ import { notify, notifyMany } from '../lib/notify.ts';
 import { notifyLateAddition } from '../lib/signing.ts';
 import { applyMove, assertValidMoveInput, describeMove, hasDirectReports } from '../lib/moves.ts';
 import { CAR_PLATE_PATTERN } from '../lib/cars.ts';
+import { PHONE_PATTERN, normalizePhone } from '../lib/phone.ts';
 import {
   MAX_ROOMMATE_PREFERENCES,
   getStandingPreferences,
@@ -338,13 +339,53 @@ usersRouter.post('/ex-workers', requireApproved, (req, res) => {
   res.status(201).json({ user: toPublicUser(db, created) });
 });
 
-const profileEditSchema = z.object({
-  firstName: z.string().trim().min(2, 'שם פרטי חייב להכיל לפחות 2 תווים').max(40),
-  lastName: z.string().trim().min(2, 'שם משפחה חייב להכיל לפחות 2 תווים').max(40),
-  gender: z.enum(['male', 'female']),
-  diet: z.enum(['all', 'vegetarian', 'vegan']),
-  unitName: z.string().trim().min(2).max(60).optional(),
-});
+const profileEditSchema = z
+  .object({
+    firstName: z.string().trim().min(2, 'שם פרטי חייב להכיל לפחות 2 תווים').max(40),
+    lastName: z.string().trim().min(2, 'שם משפחה חייב להכיל לפחות 2 תווים').max(40),
+    gender: z.enum(['male', 'female']),
+    diet: z.enum(['all', 'vegetarian', 'vegan']),
+    unitName: z.string().trim().min(2).max(60).optional(),
+    phone: z
+      .string()
+      .trim()
+      .transform(normalizePhone)
+      .pipe(z.string().regex(PHONE_PATTERN, 'מספר טלפון לא תקין - יש להזין מספר ישראלי בן 9-10 ספרות')),
+    allergies: z.string().trim().max(200).optional(),
+    /** רלוונטי לחיילים בלבד (users.worker_type) - ראו deriveWorkerType למטה. */
+    workerType: z.enum(['regular', 'borrowed', 'reserve']).optional(),
+    borrowedFrom: z.string().trim().min(2, 'יש לציין מאיפה הושאל העובד').max(80).optional(),
+    borrowedMission: z.string().trim().min(2, 'יש לציין את המשימה שבשבילה מבקשים את ההשאלה').max(200).optional(),
+  })
+  .refine((value) => value.workerType !== 'borrowed' || !!value.borrowedFrom, {
+    message: 'לעובד מושאל (הצ״ח) חובה לציין מאיפה הושאל',
+    path: ['borrowedFrom'],
+  })
+  .refine((value) => value.workerType !== 'borrowed' || !!value.borrowedMission, {
+    message: 'לעובד מושאל (הצ״ח) חובה לציין את המשימה שבשבילה מבקשים את ההשאלה',
+    path: ['borrowedMission'],
+  });
+
+type ProfileEditInput = z.infer<typeof profileEditSchema>;
+
+/**
+ * סוג העובד ניתן לעריכה עצמית לחיילים בלבד (worker_type - ראו types.ts):
+ * מפקד תמיד נשאר 'regular'. כשלא נשלח ערך (למשל מפקד עורך את עצמו, או טופס
+ * שלא כלל את השדה) נשמר הערך הנוכחי - כדי שעדכון שם/תזונה לא יאפס בטעות
+ * מעמד "מושאל"/"מילואים" קיים.
+ */
+function deriveWorkerType(
+  target: UserRow,
+  input: ProfileEditInput,
+): { workerType: UserRow['worker_type']; borrowedFrom: string | null; borrowedMission: string | null } {
+  if (target.role !== 'employee') return { workerType: 'regular', borrowedFrom: null, borrowedMission: null };
+  const workerType = input.workerType ?? target.worker_type;
+  return {
+    workerType,
+    borrowedFrom: workerType === 'borrowed' ? (input.borrowedFrom ?? target.borrowed_from) : null,
+    borrowedMission: workerType === 'borrowed' ? (input.borrowedMission ?? target.borrowed_mission) : null,
+  };
+}
 
 /** ייצוג ה־API של בקשת עדכון פרופיל, עם הערכים הנוכחיים לצד המוצעים לתצוגת השוואה. */
 function toPublicProfileEdit(edit: ProfileEditRow) {
@@ -360,6 +401,11 @@ function toPublicProfileEdit(edit: ProfileEditRow) {
       gender: user.gender,
       diet: user.diet,
       unitName: user.unit_name,
+      phone: user.phone,
+      allergies: user.allergies,
+      workerType: user.worker_type,
+      borrowedFrom: user.borrowed_from,
+      borrowedMission: user.borrowed_mission,
     },
     proposed: {
       firstName: edit.first_name,
@@ -367,6 +413,11 @@ function toPublicProfileEdit(edit: ProfileEditRow) {
       gender: edit.gender,
       diet: edit.diet,
       unitName: edit.unit_name,
+      phone: edit.phone,
+      allergies: edit.allergies,
+      workerType: edit.worker_type,
+      borrowedFrom: edit.borrowed_from,
+      borrowedMission: edit.borrowed_mission,
     },
     status: edit.status,
     decisionNote: edit.decision_note,
@@ -403,13 +454,20 @@ usersRouter.post('/me/profile-edit', requireApproved, (req, res) => {
     throw badRequest('למפקד חובה להזין שם יחידה');
   }
   const unitName = user.role === 'employee' ? null : (input.unitName ?? null);
+  const allergies = input.allergies?.trim() || 'ללא';
+  const { workerType, borrowedFrom, borrowedMission } = deriveWorkerType(user, input);
 
   const unchanged =
     input.firstName === user.first_name &&
     input.lastName === user.last_name &&
     input.gender === user.gender &&
     input.diet === user.diet &&
-    unitName === user.unit_name;
+    unitName === user.unit_name &&
+    input.phone === user.phone &&
+    allergies === user.allergies &&
+    workerType === user.worker_type &&
+    borrowedFrom === user.borrowed_from &&
+    borrowedMission === user.borrowed_mission;
 
   const existing = getPendingProfileEdit(user.id);
 
@@ -425,20 +483,48 @@ usersRouter.post('/me/profile-edit', requireApproved, (req, res) => {
       return plain<ProfileEditRow>(
         db
           .prepare(
-            `UPDATE profile_edits SET first_name = ?, last_name = ?, gender = ?, diet = ?, unit_name = ?
+            `UPDATE profile_edits
+                SET first_name = ?, last_name = ?, gender = ?, diet = ?, unit_name = ?,
+                    phone = ?, allergies = ?, worker_type = ?, borrowed_from = ?, borrowed_mission = ?
               WHERE id = ? RETURNING *`,
           )
-          .get(input.firstName, input.lastName, input.gender, input.diet, unitName, existing.id),
+          .get(
+            input.firstName,
+            input.lastName,
+            input.gender,
+            input.diet,
+            unitName,
+            input.phone,
+            allergies,
+            workerType,
+            borrowedFrom,
+            borrowedMission,
+            existing.id,
+          ),
       );
     }
 
     const created = plain<ProfileEditRow>(
       db
         .prepare(
-          `INSERT INTO profile_edits (user_id, first_name, last_name, gender, diet, unit_name)
-           VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+          `INSERT INTO profile_edits
+             (user_id, first_name, last_name, gender, diet, unit_name, phone, allergies,
+              worker_type, borrowed_from, borrowed_mission)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
         )
-        .get(user.id, input.firstName, input.lastName, input.gender, input.diet, unitName),
+        .get(
+          user.id,
+          input.firstName,
+          input.lastName,
+          input.gender,
+          input.diet,
+          unitName,
+          input.phone,
+          allergies,
+          workerType,
+          borrowedFrom,
+          borrowedMission,
+        ),
     );
 
     const title = 'בקשת עדכון פרופיל';
@@ -506,8 +592,23 @@ usersRouter.post('/profile-edits/:id/approve', (req, res) => {
 
   tx(() => {
     db.prepare(
-      `UPDATE users SET first_name = ?, last_name = ?, gender = ?, diet = ?, unit_name = ? WHERE id = ?`,
-    ).run(edit.first_name, edit.last_name, edit.gender, edit.diet, edit.unit_name, target.id);
+      `UPDATE users
+          SET first_name = ?, last_name = ?, gender = ?, diet = ?, unit_name = ?,
+              phone = ?, allergies = ?, worker_type = ?, borrowed_from = ?, borrowed_mission = ?
+        WHERE id = ?`,
+    ).run(
+      edit.first_name,
+      edit.last_name,
+      edit.gender,
+      edit.diet,
+      edit.unit_name,
+      edit.phone,
+      edit.allergies,
+      edit.worker_type,
+      edit.borrowed_from,
+      edit.borrowed_mission,
+      target.id,
+    );
 
     db.prepare(
       `UPDATE profile_edits SET status = 'approved', decided_by = ?, decided_at = datetime('now') WHERE id = ?`,
@@ -588,11 +689,28 @@ usersRouter.patch('/:id/profile', (req, res) => {
     throw badRequest('למפקד חובה להזין שם יחידה');
   }
   const unitName = target.role === 'employee' ? null : (input.unitName ?? null);
+  const allergies = input.allergies?.trim() || 'ללא';
+  const { workerType, borrowedFrom, borrowedMission } = deriveWorkerType(target, input);
 
   tx(() => {
     db.prepare(
-      `UPDATE users SET first_name = ?, last_name = ?, gender = ?, diet = ?, unit_name = ? WHERE id = ?`,
-    ).run(input.firstName, input.lastName, input.gender, input.diet, unitName, target.id);
+      `UPDATE users
+          SET first_name = ?, last_name = ?, gender = ?, diet = ?, unit_name = ?,
+              phone = ?, allergies = ?, worker_type = ?, borrowed_from = ?, borrowed_mission = ?
+        WHERE id = ?`,
+    ).run(
+      input.firstName,
+      input.lastName,
+      input.gender,
+      input.diet,
+      unitName,
+      input.phone,
+      allergies,
+      workerType,
+      borrowedFrom,
+      borrowedMission,
+      target.id,
+    );
 
     // עריכה ישירה מייתרת כל בקשה ממתינה של האדם עצמו - היא כבר לא רלוונטית.
     db.prepare(`DELETE FROM profile_edits WHERE user_id = ? AND status = 'pending'`).run(target.id);
@@ -663,17 +781,28 @@ const moveSchema = z.object({
   successorId: z.number().int().positive().nullish(),
 });
 
+/** בקשת העברת מפקד ממתינה של המשתמש המחובר עצמו, אם יש - ראו POST /:id/move. */
+usersRouter.get('/me/move', requireApproved, (req, res) => {
+  const user = requireUser(req);
+  const row = db.prepare(`SELECT * FROM move_requests WHERE user_id = ? AND status = 'pending'`).get(user.id);
+  res.json({ pending: row ? toPublicMoveRequest(plain<MoveRequestRow>(row)) : null });
+});
+
 /**
  * בקשה להעביר כפיף למפקד אחר בעץ. אם המפקד היעד בתוך שרשרת הפיקוד של
  * המבקש - שהוא כבר בעל סמכות עליו - ההעברה חלה מיד. אחרת היא ממתינה
  * לאישור המפקד היעד.
+ *
+ * זמין גם על עצמו (בקשת שינוי מפקד עצמאית, למשל חייל שרוצה לעבור מפקד) -
+ * assertCanManage לא נבדק במקרה הזה, כי אדם תמיד "רשאי" לבקש להעביר את
+ * עצמו. ההעברה עצמה עדיין ממתינה לאישור המפקד היעד, בדיוק כמו הרשמה.
  */
 usersRouter.post('/:id/move', (req, res) => {
   const acting = requireUser(req);
   const targetId = idParam.parse(req.params.id);
   const target = getUser(db, targetId);
   if (!target) throw notFound('המשתמש לא נמצא');
-  assertCanManage(acting, target);
+  if (acting.id !== target.id) assertCanManage(acting, target);
 
   const parsed = moveSchema.safeParse(req.body);
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? 'הנתונים שהוזנו אינם תקינים');

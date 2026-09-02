@@ -92,6 +92,9 @@ export const DIET_LABEL: Record<string, string> = {
   vegan: 'טבעוני',
 };
 
+/** ברירת המחדל לשדה האלרגיות כשלא הוזן דבר - ראו users.allergies בשרת. */
+export const NO_ALLERGIES = 'ללא';
+
 /** עובד רגיל מול עובד-לשעבר שהמפקד הוסיף ישירות לצוות. */
 export const WORKER_TYPE_LABEL: Record<string, string> = {
   regular: 'עובד רגיל',

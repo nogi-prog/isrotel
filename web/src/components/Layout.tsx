@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { api, type Notification } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { ROLE_LABEL } from '../lib/he';
+import { NOTIFICATIONS_READ_EVENT } from '../lib/notifications';
 import { Badge } from './ui';
 import { ThemeToggle } from './ThemeToggle';
 import { ContactDropdown } from './ContactDropdown';
@@ -37,9 +38,13 @@ export function Layout({ children }: { children: ReactNode }) {
     };
     void load();
     const timer = setInterval(load, 60_000);
+    // מסך ההתראות מסמן הכל כנקרא ברגע שהמשתמש רואה אותן - עדכון מיידי של
+    // הספרה בסרגל, בלי לחכות לפולינג הבא.
+    window.addEventListener(NOTIFICATIONS_READ_EVENT, load);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      window.removeEventListener(NOTIFICATIONS_READ_EVENT, load);
     };
   }, []);
 

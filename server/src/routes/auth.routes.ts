@@ -15,6 +15,7 @@ import {
   verifyPassword,
 } from '../lib/password.ts';
 import { MAX_ROOMMATE_PREFERENCES, listRoommateCandidates, saveStandingPreferences } from '../lib/roommates.ts';
+import { PHONE_PATTERN, normalizePhone } from '../lib/phone.ts';
 import {
   PARENT_ROLES,
   REGISTRABLE_ROLES,
@@ -44,6 +45,12 @@ const registerSchema = z
     lastName: z.string().trim().min(2, 'שם משפחה חייב להכיל לפחות 2 תווים').max(40),
     gender: z.enum(['male', 'female']),
     diet: z.enum(['all', 'vegetarian', 'vegan']),
+    phone: z
+      .string()
+      .trim()
+      .transform(normalizePhone)
+      .pipe(z.string().regex(PHONE_PATTERN, 'מספר טלפון לא תקין - יש להזין מספר ישראלי בן 9-10 ספרות')),
+    allergies: z.string().trim().max(200).optional(),
     managerId: z.number().int().positive().nullish(),
     role: z.enum(REGISTRABLE_ROLES).default('employee'),
     unitName: z.string().trim().min(2).max(60).optional(),
@@ -180,8 +187,9 @@ authRouter.post('/register', (req, res) => {
   const user = tx(() => {
     const row = db
       .prepare(
-        `INSERT INTO users (company_id, first_name, last_name, gender, role, diet, manager_id, unit_name, password_hash, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        `INSERT INTO users
+           (company_id, first_name, last_name, gender, role, diet, manager_id, unit_name, phone, allergies, password_hash, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
          RETURNING *`,
       )
       .get(
@@ -193,6 +201,8 @@ authRouter.post('/register', (req, res) => {
         input.diet,
         manager?.id ?? null,
         input.unitName ?? null,
+        input.phone,
+        input.allergies?.trim() || 'ללא',
         hashPassword(input.password),
       );
 

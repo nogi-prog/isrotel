@@ -10,11 +10,10 @@ import {
   type ShiftReportsResponse,
   type ShiftReportSubject,
   type ShiftReportSummaryEntry,
-  type Signup,
   type Trip,
   type TripSummary,
 } from '../lib/api';
-import { useCurrentUser } from '../lib/auth';
+import { useAuth, useCurrentUser } from '../lib/auth';
 import { errorMessage, useApi } from '../lib/useApi';
 import {
   CAR_STATUS_LABEL,
@@ -526,13 +525,9 @@ function MyTripView({
         )}
       </Card>
 
+      {/* דרך ההגעה משולבת בטופס השלמת הפרטים למי שיכול לבחור; רת״ח ומפמ״ר מקבלים הודעה קבועה בלבד. */}
+      {editable && alwaysBringsOwnCar(user.role) && <OwnCarNotice carPlate={user.carPlate} />}
       {editable && <CompleteDetailsForm trip={trip} onChanged={onChanged} />}
-      {editable &&
-        (alwaysBringsOwnCar(user.role) ? (
-          <OwnCarNotice carPlate={user.carPlate} />
-        ) : (
-          <CarChoiceCard trip={trip} signup={signup} onChanged={onChanged} />
-        ))}
 
       <div className="grid">
         <Card title="אוטובוס">
@@ -615,12 +610,17 @@ function MyTripView({
   );
 }
 
+const CAR_PLATE_PATTERN = /^\d{7,8}$/;
+
 /**
- * השלמת הפרטים שהמשתמש עצמו אחראי עליהם: שותפים לחדר ואישור תזונה.
- * אין כאן אפשרות להסיר את עצמו מהגלישה - זו פעולה של המפקד.
+ * השלמת הפרטים שהמשתמש עצמו אחראי עליהם: אישור תזונה, דרך הגעה, ושותפים
+ * לחדר - הכול בטופס אחד עם שמירה בודדת, כדי שדרך ההגעה לא תיפול בין
+ * הכיסאות כשהיא כרטיס נפרד. אין כאן אפשרות להסיר את עצמו מהגלישה - זו
+ * פעולה של המפקד. רת״ח ומפמ״ר לא רואים את קטע דרך ההגעה כלל - ראו
+ * OwnCarNotice, שמוצג עבורם במקום זה (alwaysBringsOwnCar).
  */
 function CompleteDetailsForm({ trip, onChanged }: { trip: Trip; onChanged: () => Promise<void> }) {
-  const user = useCurrentUser();
+  const { user, refresh } = useAuth();
   const signup = trip.mySignup!;
 
   const [diet, setDiet] = useState<Diet>(signup.diet);
@@ -629,12 +629,26 @@ function CompleteDetailsForm({ trip, onChanged }: { trip: Trip; onChanged: () =>
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  // מסומן אחרי ניסיון שמירה - מציג שדות חובה ריקים באדום (ראו Field).
+  const [attempted, setAttempted] = useState(false);
+
+  const showArrival = !!user && !alwaysBringsOwnCar(user.role);
+  const [arrival, setArrival] = useState<'bus' | 'own'>(
+    signup.carStatus !== 'none' && signup.carStatus !== 'rejected' ? 'own' : 'bus',
+  );
+  const [passengerId, setPassengerId] = useState<number | null>(signup.carPassenger?.id ?? null);
+  const [carPlate, setCarPlate] = useState(user?.carPlate ?? '');
+  const wantsCar = arrival === 'own';
+  const plateInvalid = attempted && wantsCar && !CAR_PLATE_PATTERN.test(carPlate.trim());
 
   const mySignupData = useApi<{ signup: { preferences: Array<{ id: number }> } | null }>(
     `/trips/${trip.id}/my-signup`,
   );
   const candidates = useApi<{ candidates: RoommateCandidate[]; note?: string }>(
     `/trips/${trip.id}/roommate-candidates?cycleId=${signup.cycleId}`,
+  );
+  const carCandidates = useApi<{ candidates: CarPassengerCandidate[] }>(
+    showArrival && wantsCar ? `/trips/${trip.id}/car-passenger-candidates?cycleId=${signup.cycleId}` : null,
   );
 
   const [selected, setSelected] = useState<number[] | null>(null);
@@ -665,19 +679,33 @@ function CompleteDetailsForm({ trip, onChanged }: { trip: Trip; onChanged: () =>
     event.preventDefault();
     setError('');
     setMessage('');
+    setAttempted(true);
+
     if (!dietConfirmed) {
       setError('חובה לאשר את העדפת התזונה');
       return;
     }
+    if (plateInvalid) {
+      setError('יש להזין מספר רכב תקין (7-8 ספרות)');
+      return;
+    }
+
     setBusy(true);
     try {
+      if (showArrival && wantsCar && carPlate.trim() !== (user?.carPlate ?? '')) {
+        await api.put('/users/me/car-plate', { carPlate: carPlate.trim() });
+        await refresh();
+      }
+
       await api.patch(`/trips/${trip.id}/my-signup`, {
         diet,
         dietConfirmed: true,
         preferences: current,
+        ...(showArrival ? { wantsCar, carPassengerId: wantsCar ? passengerId : null } : {}),
       });
       setMessage('הפרטים נשמרו.');
       setSelected(null);
+      setAttempted(false);
       await Promise.all([onChanged(), mySignupData.reload()]);
     } catch (caught) {
       setError(errorMessage(caught, 'השמירה נכשלה'));
@@ -685,6 +713,8 @@ function CompleteDetailsForm({ trip, onChanged }: { trip: Trip; onChanged: () =>
       setBusy(false);
     }
   };
+
+  if (!user) return null;
 
   return (
     <form onSubmit={save}>
@@ -715,6 +745,56 @@ function CompleteDetailsForm({ trip, onChanged }: { trip: Trip; onChanged: () =>
           </span>
         </label>
       </Card>
+
+      {showArrival && (
+        <Card title="דרך הגעה">
+          {signup.carStatus !== 'none' && (
+            <div className="row" style={{ marginBottom: '0.75rem' }}>
+              <Badge kind={signup.carStatus === 'approved' ? 'ok' : signup.carStatus === 'pending' ? 'warn' : 'danger'}>
+                {CAR_STATUS_LABEL[signup.carStatus]}
+              </Badge>
+              {signup.carPassenger && <span className="muted small">נוסע: {signup.carPassenger.fullName}</span>}
+            </div>
+          )}
+          {signup.carDecisionNote && <Alert kind="warn">הערת המפקד: {signup.carDecisionNote}</Alert>}
+
+          <Field label="דרך הגעה">
+            <select value={arrival} onChange={(event) => setArrival(event.target.value as 'bus' | 'own')}>
+              <option value="bus">הסעה</option>
+              <option value="own">עצמאי (רכב פרטי - טעון אישור רת״ח)</option>
+            </select>
+          </Field>
+
+          {wantsCar && (
+            <>
+              <Field label="מספר רכב (7-8 ספרות)" invalid={plateInvalid}>
+                <input
+                  value={carPlate}
+                  onChange={(event) => setCarPlate(event.target.value)}
+                  placeholder="1234567"
+                  inputMode="numeric"
+                  maxLength={8}
+                  required
+                />
+              </Field>
+
+              <Field label="נוסע נוסף ברכב (עד אחד, לא חובה)">
+                <select
+                  value={passengerId ?? ''}
+                  onChange={(event) => setPassengerId(event.target.value ? Number(event.target.value) : null)}
+                >
+                  <option value="">ללא נוסע</option>
+                  {(carCandidates.data?.candidates ?? []).map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.fullName} · {candidate.unitPath}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          )}
+        </Card>
+      )}
 
       <Card
         title={`בחירת שותפים לחדר (עד ${MAX_PREFERENCES})`}
@@ -813,92 +893,3 @@ function OwnCarNotice({ carPlate }: { carPlate: string | null }) {
   );
 }
 
-/**
- * בחירת אופן ההגעה - אוטובוס או רכב פרטי.
- * ההעדפה היא שכמה שיותר אנשים יגיעו באוטובוס, ולכן בקשת רכב תמיד ממתינה
- * לאישור הרת״ח הקרוב בשרשרת הפיקוד (או האופרטיבי אם אין רת״ח מעליו). ברכב
- * יכול להצטרף נוסע אחד נוסף שגם הוא רשום לאותה פעימה. רת״ח ומפמ״ר לא רואים
- * את הכרטיס הזה כלל - ראו OwnCarNotice.
- */
-function CarChoiceCard({
-  trip,
-  signup,
-  onChanged,
-}: {
-  trip: Trip;
-  signup: NonNullable<Trip['mySignup']>;
-  onChanged: () => Promise<void>;
-}) {
-  const [wantsCar, setWantsCar] = useState(signup.carStatus !== 'none' && signup.carStatus !== 'rejected');
-  const [passengerId, setPassengerId] = useState<number | null>(signup.carPassenger?.id ?? null);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const candidates = useApi<{ candidates: CarPassengerCandidate[] }>(
-    wantsCar ? `/trips/${trip.id}/car-passenger-candidates?cycleId=${signup.cycleId}` : null,
-  );
-
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setError('');
-    setMessage('');
-    setBusy(true);
-    try {
-      await api.patch<{ signup: Signup }>(`/trips/${trip.id}/my-signup`, {
-        wantsCar,
-        carPassengerId: wantsCar ? passengerId : null,
-      });
-      setMessage(!wantsCar ? 'עודכן לנסיעה באוטובוס.' : 'בקשת הרכב הפרטי נשלחה וממתינה לאישור.');
-      await onChanged();
-    } catch (caught) {
-      setError(errorMessage(caught, 'השמירה נכשלה'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Card title="אופן ההגעה">
-      <Alert kind="error">{error}</Alert>
-      <Alert kind="success">{message}</Alert>
-
-      {signup.carStatus !== 'none' && (
-        <div className="row" style={{ marginBottom: '0.75rem' }}>
-          <Badge kind={signup.carStatus === 'approved' ? 'ok' : signup.carStatus === 'pending' ? 'warn' : 'danger'}>
-            {CAR_STATUS_LABEL[signup.carStatus]}
-          </Badge>
-          {signup.carPassenger && <span className="muted small">נוסע: {signup.carPassenger.fullName}</span>}
-        </div>
-      )}
-      {signup.carDecisionNote && <Alert kind="warn">הערת המפקד: {signup.carDecisionNote}</Alert>}
-
-      <form onSubmit={save}>
-        <label className="checkbox">
-          <input type="checkbox" checked={wantsCar} onChange={(event) => setWantsCar(event.target.checked)} />
-          <span>אני מגיע/ה ברכב פרטי ולא באוטובוס (טעון אישור רת״ח)</span>
-        </label>
-
-        {wantsCar && (
-          <Field label="נוסע נוסף ברכב (עד אחד, לא חובה)">
-            <select
-              value={passengerId ?? ''}
-              onChange={(event) => setPassengerId(event.target.value ? Number(event.target.value) : null)}
-            >
-              <option value="">ללא נוסע</option>
-              {(candidates.data?.candidates ?? []).map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.fullName} · {candidate.unitPath}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-
-        <button type="submit" className="btn btn--primary" disabled={busy}>
-          {busy ? 'שומר...' : 'שמירה'}
-        </button>
-      </form>
-    </Card>
-  );
-}

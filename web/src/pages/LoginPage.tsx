@@ -10,7 +10,7 @@ import {
   type RoommateOption,
 } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { DIET_LABEL, GENDER_LABEL_SINGULAR, ROLE_LABEL_LONG } from '../lib/he';
+import { DIET_LABEL, GENDER_LABEL_SINGULAR, NO_ALLERGIES, ROLE_LABEL_LONG } from '../lib/he';
 import { Alert, Badge, Field } from '../components/ui';
 import { ManagerPicker, useEligibleManagers } from '../components/ManagerPicker';
 
@@ -25,6 +25,9 @@ function passwordStrengthError(value: string): string | null {
   if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return 'הסיסמה חייבת להכיל גם אותיות (אנגלית) וגם ספרות';
   return null;
 }
+
+/** אותה בדיקה כמו בשרת (lib/phone.ts) - כדי לתת משוב מיידי בלי סיבוב לשרת. */
+const PHONE_PATTERN = /^0\d{8,9}$/;
 
 export function LoginPage() {
   const { signIn } = useAuth();
@@ -47,7 +50,11 @@ export function LoginPage() {
   const [diet, setDiet] = useState<Diet>('all');
   const [role, setRole] = useState<Role>('employee');
   const [unitName, setUnitName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [allergies, setAllergies] = useState('');
   const [managerId, setManagerId] = useState<number | null>(null);
+  // מסומן אחרי ניסיון שמירה ראשון - מציג שדות חובה ריקים באדום (ראו Field).
+  const [attempted, setAttempted] = useState(false);
   const [roommatePreferences, setRoommatePreferences] = useState<number[]>([]);
   // אותו state של הסיסמה משמש גם לניסיון ההתחברות וגם, אם התברר שהמספר
   // האישי לא רשום, כברירת מחדל לשדה הסיסמה בטופס ההרשמה.
@@ -109,9 +116,21 @@ export function LoginPage() {
     setStep('login');
   };
 
+  const needsManager = !eligible.rootRegistration;
+  const needsUnitName = role !== 'employee';
+  const firstNameInvalid = attempted && firstName.trim().length < 2;
+  const lastNameInvalid = attempted && lastName.trim().length < 2;
+  const genderInvalid = attempted && !gender;
+  const phoneInvalid = attempted && !PHONE_PATTERN.test(phone.trim().replace(/[\s-]/g, ''));
+  const unitNameInvalid = attempted && needsUnitName && !unitName.trim();
+  const managerInvalid = attempted && needsManager && managerId == null;
+  const passwordInvalid = attempted && !!passwordStrengthError(password);
+  const confirmPasswordInvalid = attempted && password !== confirmPassword;
+
   const submitRegistration = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+    setAttempted(true);
 
     if (!gender) {
       setError('חובה לבחור מין');
@@ -126,9 +145,16 @@ export function LoginPage() {
       setError('הסיסמאות אינן תואמות');
       return;
     }
+    if (!PHONE_PATTERN.test(phone.trim().replace(/[\s-]/g, ''))) {
+      setError('מספר טלפון לא תקין - יש להזין מספר ישראלי בן 9-10 ספרות');
+      return;
+    }
+    if (needsUnitName && !unitName.trim()) {
+      setError('למפקד חובה להזין שם יחידה');
+      return;
+    }
     // למי שנרשם בראש השרשרת (מפמ״ר), או כשאין עדיין מפקד מאושר מהדרג שמעליו,
     // אין מפקד לבחור - השרת מסמן את זה ב־rootRegistration.
-    const needsManager = !eligible.rootRegistration;
     if (needsManager && managerId == null) {
       setError('חובה לבחור מפקד');
       return;
@@ -145,6 +171,8 @@ export function LoginPage() {
         gender,
         diet,
         role,
+        phone,
+        ...(allergies.trim() ? { allergies: allergies.trim() } : {}),
         ...(needsManager ? { managerId } : {}),
         ...(role === 'employee' ? {} : { unitName }),
         // בחירת שותפים אינה חובה - נשלחת רק אם נבחרו.
@@ -249,16 +277,27 @@ export function LoginPage() {
         <Alert kind="error">{error}</Alert>
 
         <div className="field-row">
-          <Field label="שם פרטי">
+          <Field label="שם פרטי" invalid={firstNameInvalid}>
             <input value={firstName} onChange={(event) => setFirstName(event.target.value)} required autoFocus />
           </Field>
-          <Field label="שם משפחה">
+          <Field label="שם משפחה" invalid={lastNameInvalid}>
             <input value={lastName} onChange={(event) => setLastName(event.target.value)} required />
           </Field>
         </div>
 
+        <Field label="טלפון" hint="לדוגמה 0501234567" invalid={phoneInvalid}>
+          <input
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="0501234567"
+            required
+          />
+        </Field>
+
         <div className="field-row">
-          <Field label="סיסמה" hint="לפחות 8 תווים, אותיות (אנגלית) וגם ספרות">
+          <Field label="סיסמה" hint="לפחות 8 תווים, אותיות (אנגלית) וגם ספרות" invalid={passwordInvalid}>
             <input
               type="password"
               value={password}
@@ -268,7 +307,7 @@ export function LoginPage() {
               required
             />
           </Field>
-          <Field label="אימות סיסמה">
+          <Field label="אימות סיסמה" invalid={confirmPasswordInvalid}>
             <input
               type="password"
               value={confirmPassword}
@@ -281,7 +320,7 @@ export function LoginPage() {
         </div>
 
         <div className="field-row">
-          <Field label="מין" hint="קובע את שיוך מבנה הלינה">
+          <Field label="מין" hint="קובע את שיוך מבנה הלינה" invalid={genderInvalid}>
             <select value={gender} onChange={(event) => setGender(event.target.value as Gender)} required>
               <option value="">בחר...</option>
               <option value="male">{GENDER_LABEL_SINGULAR.male}</option>
@@ -300,6 +339,10 @@ export function LoginPage() {
           </Field>
         </div>
 
+        <Field label="אלרגיות" hint={`לא חובה - ברירת המחדל היא "${NO_ALLERGIES}"`}>
+          <input value={allergies} onChange={(event) => setAllergies(event.target.value)} placeholder={NO_ALLERGIES} />
+        </Field>
+
         <Field label="תפקיד">
           <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
             {REGISTRABLE_ROLES.map((option) => (
@@ -311,12 +354,17 @@ export function LoginPage() {
         </Field>
 
         {role !== 'employee' && (
-          <Field label="שם היחידה שבפיקודך" hint="לדוגמה: צוות אלון / מדור תוכנה / תחום פיתוח / כל החברה">
+          <Field
+            label="שם היחידה שבפיקודך"
+            hint="לדוגמה: צוות אלון / מדור תוכנה / תחום פיתוח / כל החברה"
+            invalid={unitNameInvalid}
+          >
             <input value={unitName} onChange={(event) => setUnitName(event.target.value)} required />
           </Field>
         )}
 
         <ManagerPicker role={role} options={eligible} value={managerId} onChange={setManagerId} />
+        {managerInvalid && <Alert kind="error">חובה לבחור מפקד</Alert>}
 
         <RoommatePreferencePicker
           gender={gender}

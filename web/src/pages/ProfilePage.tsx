@@ -4,6 +4,7 @@ import {
   type Diet,
   type Gender,
   type HierarchyMember,
+  type MoveRequest,
   type ProfileEditRequest,
   type Role,
   type RoommateOption,
@@ -16,6 +17,7 @@ import { errorMessage, useApi } from '../lib/useApi';
 import {
   DIET_LABEL,
   GENDER_LABEL_SINGULAR,
+  NO_ALLERGIES,
   ROLE_LABEL,
   ROLE_LABEL_LONG,
   unitWordForRole,
@@ -27,6 +29,15 @@ import { ManagerPicker, useEligibleManagers } from '../components/ManagerPicker'
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 
 const EDIT_COLUMN_COUNT = 9;
+
+/** אותה בדיקה כמו בשרת (lib/phone.ts) - כדי לתת משוב מיידי בלי סיבוב לשרת. */
+const PHONE_PATTERN = /^0\d{8,9}$/;
+function isPhoneValid(value: string): boolean {
+  return PHONE_PATTERN.test(value.trim().replace(/[\s-]/g, ''));
+}
+
+/** אותה בדיקה כמו בשרת (lib/cars.ts) - כדי לתת משוב מיידי בלי סיבוב לשרת. */
+const CAR_PLATE_PATTERN = /^\d{7,8}$/;
 
 /** מפמ״ר הוא ראש השרשרת ולאופרטיבי עמדה קבועה - אף אחד מהם אינו ניתן להעברה. */
 function isMovableRole(role: Role): boolean {
@@ -65,7 +76,18 @@ export function ProfilePage() {
   const [gender, setGender] = useState<Gender>('male');
   const [diet, setDiet] = useState<Diet>('all');
   const [unitName, setUnitName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [allergies, setAllergies] = useState('');
+  const [workerType, setWorkerType] = useState<WorkerType>('regular');
+  const [borrowedFrom, setBorrowedFrom] = useState('');
+  const [borrowedMission, setBorrowedMission] = useState('');
   const [carPlate, setCarPlate] = useState('');
+  // דרך הגעה: הסעה כברירת מחדל, ומספר הרכב מוצג רק כשבוחרים עצמאי. נגזר
+  // ממספר הרכב הקיים בפרופיל (אם כבר יש - כנראה נבחר עצמאי בעבר), לא שדה
+  // עצמאי בשרת - ראו submit() למטה.
+  const [arrivalMethod, setArrivalMethod] = useState<'bus' | 'own'>('bus');
+  // מסומן אחרי ניסיון שמירה - מציג שדות חובה ריקים באדום (ראו Field).
+  const [attempted, setAttempted] = useState(false);
 
   // הטופס מוצג עם ערכי הבקשה הממתינה אם יש, אחרת עם הערכים הנוכחיים.
   useEffect(() => {
@@ -76,13 +98,24 @@ export function ProfilePage() {
       gender: user.gender,
       diet: user.diet,
       unitName: user.unitName,
+      phone: user.phone,
+      allergies: user.allergies,
+      workerType: user.workerType,
+      borrowedFrom: user.borrowedFrom,
+      borrowedMission: user.borrowedMission,
     };
     setFirstName(source.firstName);
     setLastName(source.lastName);
     setGender(source.gender);
     setDiet(source.diet);
     setUnitName(source.unitName ?? '');
+    setPhone(source.phone ?? '');
+    setAllergies(source.allergies === NO_ALLERGIES ? '' : source.allergies);
+    setWorkerType(source.workerType);
+    setBorrowedFrom(source.borrowedFrom ?? '');
+    setBorrowedMission(source.borrowedMission ?? '');
     setCarPlate(user.carPlate ?? '');
+    setArrivalMethod(user.carPlate ? 'own' : 'bus');
   }, [user, pending]);
 
   const childrenByManager = useMemo(() => buildChildrenMap(team.data?.team ?? []), [team.data]);
@@ -124,16 +157,45 @@ export function ProfilePage() {
   if (!user) return null;
   if (loading) return <Loading />;
 
+  const isEmployee = user.role === 'employee';
+  const isBorrowed = isEmployee && workerType === 'borrowed';
+  const firstNameInvalid = attempted && firstName.trim().length < 2;
+  const lastNameInvalid = attempted && lastName.trim().length < 2;
+  const phoneInvalid = attempted && !isPhoneValid(phone);
+  const unitNameInvalid = attempted && isManager && !unitName.trim();
+  const borrowedFromInvalid = attempted && isBorrowed && !borrowedFrom.trim();
+  const borrowedMissionInvalid = attempted && isBorrowed && !borrowedMission.trim();
+  // רת״ח ומפמ״ר תמיד ברכב פרטי - אין להם בחירה, השדה מוצג תמיד עבורם בלי תלות ב"דרך הגעה".
+  const showsCarPlate = ownsCar || arrivalMethod === 'own';
+  const plateInvalid = attempted && showsCarPlate && !CAR_PLATE_PATTERN.test(carPlate.trim());
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setFormError('');
     setSuccess('');
+    setAttempted(true);
+
+    if (firstNameInvalid || lastNameInvalid || phoneInvalid || unitNameInvalid) {
+      setFormError('יש למלא את כל השדות המסומנים באדום');
+      return;
+    }
+    if (isBorrowed && (borrowedFromInvalid || borrowedMissionInvalid)) {
+      setFormError('לעובד מושאל (הצ״ח) חובה למלא מאיפה הושאל ומהי המשימה');
+      return;
+    }
+    if (plateInvalid) {
+      setFormError('יש להזין מספר רכב תקין (7-8 ספרות)');
+      return;
+    }
+
     setBusy(true);
     try {
       // מספר הרכב מתעדכן מיד בלי אישור - זה פרט מנהלי, לא שינוי בזהות
-      // או בשיוך הארגוני, ולכן הוא נשלח בנפרד משאר הפרטים.
-      if (carPlate.trim() !== (user.carPlate ?? '')) {
-        await api.put('/users/me/car-plate', { carPlate: carPlate.trim() || null });
+      // או בשיוך הארגוני, ולכן הוא נשלח בנפרד משאר הפרטים. בחירת "הסעה"
+      // מנקה מספר רכב קודם, כדי שלא יישאר תלוי באוויר בלי תפקיד.
+      const nextCarPlate = showsCarPlate ? carPlate.trim() : '';
+      if (nextCarPlate !== (user.carPlate ?? '')) {
+        await api.put('/users/me/car-plate', { carPlate: nextCarPlate || null });
         await refresh();
       }
 
@@ -142,10 +204,15 @@ export function ProfilePage() {
         lastName,
         gender,
         diet,
+        phone,
+        allergies: allergies.trim() || NO_ALLERGIES,
         ...(isManager ? { unitName } : {}),
+        ...(isEmployee ? { workerType } : {}),
+        ...(isBorrowed ? { borrowedFrom, borrowedMission } : {}),
       });
       setSuccess(response.pending ? 'הבקשה נשלחה לאישור המפקד.' : 'הפרטים נשמרו.');
       setEditing(false);
+      setAttempted(false);
       await reload();
     } catch (caught) {
       setFormError(errorMessage(caught, 'שליחת הבקשה נכשלה'));
@@ -219,10 +286,10 @@ export function ProfilePage() {
         {editing ? (
           <form onSubmit={submit}>
             <div className="field-row">
-              <Field label="שם פרטי">
+              <Field label="שם פרטי" invalid={firstNameInvalid}>
                 <input value={firstName} onChange={(event) => setFirstName(event.target.value)} required autoFocus />
               </Field>
-              <Field label="שם משפחה">
+              <Field label="שם משפחה" invalid={lastNameInvalid}>
                 <input value={lastName} onChange={(event) => setLastName(event.target.value)} required />
               </Field>
             </div>
@@ -235,6 +302,19 @@ export function ProfilePage() {
                 </select>
               </Field>
 
+              <Field label="טלפון" hint="לדוגמה 0501234567" invalid={phoneInvalid}>
+                <input
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="0501234567"
+                  required
+                />
+              </Field>
+            </div>
+
+            <div className="field-row">
               <Field label="העדפת תזונה">
                 <select value={diet} onChange={(event) => setDiet(event.target.value as Diet)}>
                   {(['all', 'vegetarian', 'vegan'] as Diet[]).map((option) => (
@@ -244,36 +324,105 @@ export function ProfilePage() {
                   ))}
                 </select>
               </Field>
+
+              <Field label="אלרגיות" hint={`לא חובה - ברירת המחדל היא "${NO_ALLERGIES}"`}>
+                <input
+                  value={allergies}
+                  onChange={(event) => setAllergies(event.target.value)}
+                  placeholder={NO_ALLERGIES}
+                />
+              </Field>
             </div>
 
             {isManager && (
-              <Field label="שם היחידה שבפיקודך" hint="לדוגמה: צוות אלון / מדור תוכנה / תחום פיתוח">
+              <Field label="שם היחידה שבפיקודך" hint="לדוגמה: צוות אלון / מדור תוכנה / תחום פיתוח" invalid={unitNameInvalid}>
                 <input value={unitName} onChange={(event) => setUnitName(event.target.value)} required />
               </Field>
             )}
 
-            <Field
-              label="מספר רכב (7-8 ספרות)"
-              hint={
-                ownsCar
-                  ? 'מתעדכן מיד - רת״ח ומפמ״ר תמיד מגיעים ברכב הפרטי שלהם, בלי צורך באישור'
-                  : 'מתעדכן מיד. משמש בבקשת הגעה ברכב פרטי לגלישה - עדיין טעון בקשה ואישור רת״ח בכל גלישה'
-              }
-            >
-              <input
-                value={carPlate}
-                onChange={(event) => setCarPlate(event.target.value)}
-                placeholder="1234567"
-                inputMode="numeric"
-                maxLength={8}
-              />
-            </Field>
+            {isEmployee && (
+              <>
+                <Field label="סוג עובד">
+                  <select value={workerType} onChange={(event) => setWorkerType(event.target.value as WorkerType)}>
+                    {(['regular', 'borrowed', 'reserve'] as WorkerType[]).map((option) => (
+                      <option key={option} value={option}>
+                        {WORKER_TYPE_LABEL[option]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                {workerType === 'borrowed' && (
+                  <div className="field-row">
+                    <Field label="מאיפה הושאל" hint="לדוגמה: מדור תוכנה / חברה חיצונית" invalid={borrowedFromInvalid}>
+                      <input value={borrowedFrom} onChange={(event) => setBorrowedFrom(event.target.value)} required />
+                    </Field>
+                    <Field label="המשימה שבשבילה מבקשים את ההשאלה" invalid={borrowedMissionInvalid}>
+                      <input
+                        value={borrowedMission}
+                        onChange={(event) => setBorrowedMission(event.target.value)}
+                        required
+                      />
+                    </Field>
+                  </div>
+                )}
+              </>
+            )}
+
+            {ownsCar ? (
+              <Field
+                label="מספר רכב (7-8 ספרות)"
+                hint="מתעדכן מיד - רת״ח ומפמ״ר תמיד מגיעים ברכב הפרטי שלהם, בלי צורך באישור"
+                invalid={plateInvalid}
+              >
+                <input
+                  value={carPlate}
+                  onChange={(event) => setCarPlate(event.target.value)}
+                  placeholder="1234567"
+                  inputMode="numeric"
+                  maxLength={8}
+                  required
+                />
+              </Field>
+            ) : (
+              <>
+                <Field label="דרך הגעה" hint="מתעדכן מיד. משמש בבקשת הגעה ברכב פרטי לגלישה - עדיין טעון בקשה ואישור רת״ח בכל גלישה">
+                  <select
+                    value={arrivalMethod}
+                    onChange={(event) => setArrivalMethod(event.target.value as 'bus' | 'own')}
+                  >
+                    <option value="bus">הסעה</option>
+                    <option value="own">עצמאי (רכב פרטי)</option>
+                  </select>
+                </Field>
+
+                {arrivalMethod === 'own' && (
+                  <Field label="מספר רכב (7-8 ספרות)" invalid={plateInvalid}>
+                    <input
+                      value={carPlate}
+                      onChange={(event) => setCarPlate(event.target.value)}
+                      placeholder="1234567"
+                      inputMode="numeric"
+                      maxLength={8}
+                      required
+                    />
+                  </Field>
+                )}
+              </>
+            )}
 
             <div className="row">
               <button type="submit" className="btn btn--primary" disabled={busy}>
                 {busy ? 'שומר...' : 'שמירה'}
               </button>
-              <button type="button" className="btn btn--ghost" onClick={() => setEditing(false)}>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  setEditing(false);
+                  setAttempted(false);
+                }}
+              >
                 ביטול
               </button>
             </div>
@@ -285,12 +434,25 @@ export function ProfilePage() {
             <InfoRow label="תפקיד" value={ROLE_LABEL_LONG[user.role] ?? user.role} />
             <InfoRow label="מפקד" value={user.managerName ?? '—'} />
             <InfoRow label="מין" value={GENDER_LABEL_SINGULAR[user.gender] ?? user.gender} />
+            <InfoRow label="טלפון" value={user.phone ?? 'לא הוזן'} />
             <InfoRow label="העדפת תזונה" value={DIET_LABEL[user.diet] ?? user.diet} />
+            <InfoRow label="אלרגיות" value={user.allergies} />
             {user.unitName && <InfoRow label="יחידה" value={user.unitName} />}
-            <InfoRow label="מספר רכב" value={user.carPlate ?? 'לא הוזן'} />
+            {isEmployee && <InfoRow label="סוג עובד" value={WORKER_TYPE_LABEL[user.workerType] ?? user.workerType} />}
+            {isEmployee && user.workerType === 'borrowed' && (
+              <>
+                <InfoRow label="מאיפה הושאל" value={user.borrowedFrom ?? '—'} />
+                <InfoRow label="המשימה" value={user.borrowedMission ?? '—'} />
+              </>
+            )}
+            {ownsCar ? (
+              <InfoRow label="מספר רכב" value={user.carPlate ?? 'לא הוזן'} />
+            ) : (
+              <InfoRow label="דרך הגעה" value={user.carPlate ? `עצמאי · ${user.carPlate}` : 'הסעה'} />
+            )}
             <p className="muted small" style={{ marginTop: '0.25rem' }}>
-              מספר אישי, תפקיד ומפקד אינם ניתנים לעריכה - כל שינוי אחר ממתין לאישור המפקד, חוץ ממספר הרכב
-              שמתעדכן מיד.
+              מספר אישי ותפקיד אינם ניתנים לעריכה - כל שינוי אחר ממתין לאישור המפקד, חוץ ממספר הרכב שמתעדכן
+              מיד. שינוי מפקד נעשה בכרטיס "שרשרת הפיקוד שלי" למטה.
             </p>
           </div>
         )}
@@ -302,6 +464,7 @@ export function ProfilePage() {
         {hierarchy.data && (
           <HierarchyChain chain={hierarchy.data.chain} selfId={user.id} childrenByManager={childrenByManager} />
         )}
+        <ChangeCommanderCard />
       </Card>
 
       <RoommatePreferencesCard />
@@ -392,6 +555,228 @@ export function ProfilePage() {
 
       <PasswordCard hasPassword={user.hasPassword} />
     </>
+  );
+}
+
+/**
+ * שינוי מפקד עצמאי (בקשה, לא עדכון מיידי) - ראו POST/DELETE/GET /users/:id/move
+ * בשרת. אם המפקד היעד מחוץ לשרשרת הפיקוד של המשתמש (המקרה הרגיל) הבקשה
+ * ממתינה לאישורו, בדיוק כמו הרשמה ראשונית. מפמ״ר ואופרטיבי לא רואים את
+ * הכרטיס הזה כלל - להם אין מפקד להחליף (isMovableRole).
+ */
+function ChangeCommanderCard() {
+  const { user, refresh } = useAuth();
+  const canMove = !!user && isMovableRole(user.role);
+  const { data, loading, error, reload } = useApi<{ pending: MoveRequest | null }>(canMove ? '/users/me/move' : null);
+  const eligible = useEligibleManagers(user?.role ?? 'employee');
+
+  const [changing, setChanging] = useState(false);
+  const [toManagerId, setToManagerId] = useState<number | null>(null);
+  const [needsSuccessor, setNeedsSuccessor] = useState(false);
+  const [successorQuery, setSuccessorQuery] = useState('');
+  const [successorResults, setSuccessorResults] = useState<UserSearchResult[]>([]);
+  const [successor, setSuccessor] = useState<UserSearchResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [success, setSuccess] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const term = successorQuery.trim();
+    if (!term) {
+      setSuccessorResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => {
+      void api
+        .get<{ results: UserSearchResult[] }>(`/users/search?q=${encodeURIComponent(term)}`)
+        .then((response) => setSuccessorResults(response.results))
+        .catch(() => setSuccessorResults([]));
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [successorQuery]);
+
+  if (!user || !canMove) return null;
+
+  const pending = data?.pending ?? null;
+
+  const cancelForm = () => {
+    setChanging(false);
+    setToManagerId(null);
+    setSuccessor(null);
+    setSuccessorQuery('');
+    setNeedsSuccessor(false);
+    setFormError('');
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setFormError('');
+    setSuccess('');
+    if (toManagerId == null) {
+      setFormError('יש לבחור מפקד חדש');
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api.post<{ applied: boolean }>(`/users/${user.id}/move`, {
+        toManagerId,
+        ...(successor ? { successorId: successor.id } : {}),
+      });
+      if (response.applied) {
+        setSuccess('המפקד עודכן.');
+        await refresh();
+      } else {
+        setSuccess('בקשת שינוי המפקד נשלחה וממתינה לאישורו.');
+      }
+      cancelForm();
+      await reload();
+    } catch (caught) {
+      const message = errorMessage(caught, 'שליחת הבקשה נכשלה');
+      // הודעת השרת כשיש כפיפים ועדיין לא נבחר ממלא מקום - חושפת את השדה לבחירה.
+      if (message.includes('ממלא מקום')) setNeedsSuccessor(true);
+      setFormError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const withdraw = async () => {
+    setFormError('');
+    setSuccess('');
+    setWithdrawing(true);
+    try {
+      await api.delete(`/users/${user.id}/move`);
+      await reload();
+    } catch (caught) {
+      setFormError(errorMessage(caught, 'ביטול הבקשה נכשל'));
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+      <div className="row row--between">
+        <strong className="small">מפקד: {user.managerName ?? '—'}</strong>
+        {!pending && !changing && (
+          <button type="button" className="btn btn--sm" onClick={() => setChanging(true)}>
+            שינוי מפקד
+          </button>
+        )}
+      </div>
+
+      {!loading && <Alert kind="error">{error}</Alert>}
+      <Alert kind="error">{formError}</Alert>
+      <Alert kind="success">{success}</Alert>
+
+      {pending && (
+        <Alert kind="warn">
+          <div className="stack" style={{ gap: '0.4rem' }}>
+            <span className="small">
+              בקשת שינוי מפקד ממתינה לאישור <strong>{pending.toManager.fullName}</strong>
+              {pending.toManager.unitName ? ` · ${pending.toManager.unitName}` : ''}
+            </span>
+            <div>
+              <button type="button" className="btn btn--sm" disabled={withdrawing} onClick={() => void withdraw()}>
+                {withdrawing ? 'מבטל...' : 'בטל בקשה'}
+              </button>
+            </div>
+          </div>
+        </Alert>
+      )}
+
+      {changing && !pending && (
+        <form onSubmit={submit} className="stack" style={{ marginTop: '0.5rem' }}>
+          <ManagerPicker role={user.role} options={eligible} value={toManagerId} onChange={setToManagerId} label="מפקד חדש" />
+
+          {needsSuccessor && (
+            <div className="field">
+              <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>ממלא מקום ביחידה הנוכחית שלך</span>
+              {successor ? (
+                <div className="combo__selected">
+                  <span>
+                    <strong>{successor.fullName}</strong>
+                    <span className="muted"> · {successor.companyId}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--ghost"
+                    onClick={() => {
+                      setSuccessor(null);
+                      setSuccessorQuery('');
+                    }}
+                  >
+                    שינוי
+                  </button>
+                </div>
+              ) : (
+                <div className="combo">
+                  <input
+                    value={successorQuery}
+                    onChange={(event) => setSuccessorQuery(event.target.value)}
+                    placeholder="חיפוש לפי שם או מספר אישי"
+                    autoComplete="off"
+                  />
+                  {successorQuery.trim() && (
+                    <ul className="combo__list" role="listbox">
+                      {successorResults.length === 0 ? (
+                        <li className="combo__empty">לא נמצאו תוצאות</li>
+                      ) : (
+                        successorResults.map((candidate) => (
+                          <li key={candidate.id}>
+                            <button
+                              type="button"
+                              className="combo__option"
+                              role="option"
+                              aria-selected={false}
+                              disabled={candidate.id === user.id || candidate.hasDirectReports}
+                              onClick={() => {
+                                setSuccessor(candidate);
+                                setSuccessorQuery('');
+                                setSuccessorResults([]);
+                              }}
+                            >
+                              <span>
+                                {candidate.fullName}
+                                <span className="muted small"> · {ROLE_LABEL[candidate.role]}</span>
+                              </span>
+                              <span className="muted small">
+                                {candidate.id === user.id
+                                  ? 'זה אתה'
+                                  : candidate.hasDirectReports
+                                    ? 'כבר מפקד על יחידה משלו'
+                                    : candidate.unitPath}
+                              </span>
+                            </button>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <span className="field__hint">
+                יש לך כפיפים משלך - יש לבחור מי יורש את היחידה שלך לפני שהמעבר יחול.
+              </span>
+            </div>
+          )}
+
+          <div className="row">
+            <button type="submit" className="btn btn--sm btn--primary" disabled={busy || eligible.loading}>
+              {busy ? 'שולח...' : 'שליחת הבקשה'}
+            </button>
+            <button type="button" className="btn btn--sm btn--ghost" onClick={cancelForm}>
+              ביטול
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 
@@ -979,6 +1364,11 @@ function EditMemberForm({
   const [gender, setGender] = useState<Gender>(member.gender);
   const [diet, setDiet] = useState<Diet>(member.diet);
   const [unitName, setUnitName] = useState(member.unitName ?? '');
+  const [phone, setPhone] = useState(member.phone ?? '');
+  const [allergies, setAllergies] = useState(member.allergies === NO_ALLERGIES ? '' : member.allergies);
+  const [workerType, setWorkerType] = useState<WorkerType>(member.workerType);
+  const [borrowedFrom, setBorrowedFrom] = useState(member.borrowedFrom ?? '');
+  const [borrowedMission, setBorrowedMission] = useState(member.borrowedMission ?? '');
   const [toManagerId, setToManagerId] = useState<number | null>(member.managerId);
   const [successorQuery, setSuccessorQuery] = useState('');
   const [successorResults, setSuccessorResults] = useState<UserSearchResult[]>([]);
@@ -987,11 +1377,22 @@ function EditMemberForm({
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  // מסומן אחרי ניסיון שמירה - מציג שדות חובה ריקים באדום (ראו Field).
+  const [attempted, setAttempted] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isManager = member.role !== 'employee';
+  const isEmployee = member.role === 'employee';
+  const isBorrowed = isEmployee && workerType === 'borrowed';
   const canMove = isMovableRole(member.role);
   const eligible = useEligibleManagers(member.role);
+
+  const firstNameInvalid = attempted && firstName.trim().length < 2;
+  const lastNameInvalid = attempted && lastName.trim().length < 2;
+  const phoneInvalid = attempted && !isPhoneValid(phone);
+  const unitNameInvalid = attempted && isManager && !unitName.trim();
+  const borrowedFromInvalid = attempted && isBorrowed && !borrowedFrom.trim();
+  const borrowedMissionInvalid = attempted && isBorrowed && !borrowedMission.trim();
 
   // מעבר לעריכת אדם אחר מאפס את הטופס לערכים שלו.
   useEffect(() => {
@@ -1000,11 +1401,17 @@ function EditMemberForm({
     setGender(member.gender);
     setDiet(member.diet);
     setUnitName(member.unitName ?? '');
+    setPhone(member.phone ?? '');
+    setAllergies(member.allergies === NO_ALLERGIES ? '' : member.allergies);
+    setWorkerType(member.workerType);
+    setBorrowedFrom(member.borrowedFrom ?? '');
+    setBorrowedMission(member.borrowedMission ?? '');
     setToManagerId(member.managerId);
     setSuccessor(null);
     setSuccessorQuery('');
     setError('');
     setSuccess('');
+    setAttempted(false);
   }, [member]);
 
   useEffect(() => {
@@ -1033,7 +1440,16 @@ function EditMemberForm({
     event.preventDefault();
     setError('');
     setSuccess('');
+    setAttempted(true);
 
+    if (firstNameInvalid || lastNameInvalid || phoneInvalid || unitNameInvalid) {
+      setError('יש למלא את כל השדות המסומנים באדום');
+      return;
+    }
+    if (isBorrowed && (borrowedFromInvalid || borrowedMissionInvalid)) {
+      setError('לעובד מושאל (הצ״ח) חובה למלא מאיפה הושאל ומהי המשימה');
+      return;
+    }
     if (managerChanged && member.hasDirectReports && !successor) {
       setError('יש למנות ממלא מקום שיירש את היחידה לפני שינוי המפקד');
       return;
@@ -1046,7 +1462,11 @@ function EditMemberForm({
         lastName,
         gender,
         diet,
+        phone,
+        allergies: allergies.trim() || NO_ALLERGIES,
         ...(isManager ? { unitName } : {}),
+        ...(isEmployee ? { workerType } : {}),
+        ...(isBorrowed ? { borrowedFrom, borrowedMission } : {}),
       });
 
       if (managerChanged && toManagerId != null) {
@@ -1076,10 +1496,10 @@ function EditMemberForm({
       <Alert kind="success">{success}</Alert>
 
       <div className="field-row">
-        <Field label="שם פרטי">
+        <Field label="שם פרטי" invalid={firstNameInvalid}>
           <input value={firstName} onChange={(event) => setFirstName(event.target.value)} required autoFocus />
         </Field>
-        <Field label="שם משפחה">
+        <Field label="שם משפחה" invalid={lastNameInvalid}>
           <input value={lastName} onChange={(event) => setLastName(event.target.value)} required />
         </Field>
       </div>
@@ -1092,6 +1512,19 @@ function EditMemberForm({
           </select>
         </Field>
 
+        <Field label="טלפון" hint="לדוגמה 0501234567" invalid={phoneInvalid}>
+          <input
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="0501234567"
+            required
+          />
+        </Field>
+      </div>
+
+      <div className="field-row">
         <Field label="העדפת תזונה">
           <select value={diet} onChange={(event) => setDiet(event.target.value as Diet)}>
             {(['all', 'vegetarian', 'vegan'] as Diet[]).map((option) => (
@@ -1101,12 +1534,41 @@ function EditMemberForm({
             ))}
           </select>
         </Field>
+
+        <Field label="אלרגיות" hint={`לא חובה - ברירת המחדל היא "${NO_ALLERGIES}"`}>
+          <input value={allergies} onChange={(event) => setAllergies(event.target.value)} placeholder={NO_ALLERGIES} />
+        </Field>
       </div>
 
       {isManager && (
-        <Field label="שם היחידה שבפיקודו">
+        <Field label="שם היחידה שבפיקודו" invalid={unitNameInvalid}>
           <input value={unitName} onChange={(event) => setUnitName(event.target.value)} required />
         </Field>
+      )}
+
+      {isEmployee && (
+        <>
+          <Field label="סוג עובד">
+            <select value={workerType} onChange={(event) => setWorkerType(event.target.value as WorkerType)}>
+              {(['regular', 'borrowed', 'reserve'] as WorkerType[]).map((option) => (
+                <option key={option} value={option}>
+                  {WORKER_TYPE_LABEL[option]}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {workerType === 'borrowed' && (
+            <div className="field-row">
+              <Field label="מאיפה הושאל" invalid={borrowedFromInvalid}>
+                <input value={borrowedFrom} onChange={(event) => setBorrowedFrom(event.target.value)} required />
+              </Field>
+              <Field label="המשימה שבשבילה מבקשים את ההשאלה" invalid={borrowedMissionInvalid}>
+                <input value={borrowedMission} onChange={(event) => setBorrowedMission(event.target.value)} required />
+              </Field>
+            </div>
+          )}
+        </>
       )}
 
       {canMove && (

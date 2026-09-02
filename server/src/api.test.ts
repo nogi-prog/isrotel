@@ -63,11 +63,13 @@ function seedUser(fields: {
   diet?: 'all' | 'vegetarian' | 'vegan';
   managerId?: number | null;
   unitName?: string | null;
+  /** ברירת המחדל תואמת את הטלפון שנשלח ב-body של טסטי /me/profile-edit, כדי שהשוואת "לא השתנה" תעבוד. */
+  phone?: string | null;
 }): number {
   const row = db
     .prepare(
-      `INSERT INTO users (company_id, first_name, last_name, gender, role, diet, manager_id, unit_name, status, approved_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', datetime('now')) RETURNING id`,
+      `INSERT INTO users (company_id, first_name, last_name, gender, role, diet, manager_id, unit_name, phone, status, approved_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', datetime('now')) RETURNING id`,
     )
     .get(
       fields.companyId,
@@ -78,6 +80,7 @@ function seedUser(fields: {
       fields.diet ?? 'all',
       fields.managerId ?? null,
       fields.unitName ?? null,
+      fields.phone === undefined ? '0501234567' : fields.phone,
     ) as { id: number };
   return row.id;
 }
@@ -216,6 +219,7 @@ describe('API מקצה לקצה', () => {
   test('הרשמה ראשונה נשמרת כממתינה לאישור המפקד, והמפקד מאשר אותה', async () => {
     const registration = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3000001',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -255,6 +259,7 @@ describe('API מקצה לקצה', () => {
     // רועי כפוף לר״צ צוות אלון - מחוץ למדור האופרטיבי לגמרי.
     const registration = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3000005',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -298,7 +303,7 @@ describe('API מקצה לקצה', () => {
 
     const submitted = await api('POST', '/api/users/me/profile-edit', {
       token: soldierToken,
-      body: { firstName: 'יונתן-חדש', lastName: 'ברק', gender: 'male', diet: 'vegetarian' },
+      body: { phone: '0501234567', firstName: 'יונתן-חדש', lastName: 'ברק', gender: 'male', diet: 'vegetarian' },
     });
     assert.equal(submitted.status, 200, JSON.stringify(submitted.body));
     assert.equal(submitted.body.pending.proposed.firstName, 'יונתן-חדש');
@@ -340,14 +345,14 @@ describe('API מקצה לקצה', () => {
 
     const missingUnit = await api('POST', '/api/users/me/profile-edit', {
       token: teamLeaderToken,
-      body: { firstName: 'עומר', lastName: 'כהן', gender: 'male', diet: 'all' },
+      body: { phone: '0501234567', firstName: 'עומר', lastName: 'כהן', gender: 'male', diet: 'all' },
     });
     assert.equal(missingUnit.status, 400);
     assert.match(missingUnit.body.error, /שם יחידה/);
 
     const submitted = await api('POST', '/api/users/me/profile-edit', {
       token: teamLeaderToken,
-      body: { firstName: 'עומר', lastName: 'כהן-שינוי', gender: 'male', diet: 'all', unitName: 'צוות אלון' },
+      body: { phone: '0501234567', firstName: 'עומר', lastName: 'כהן-שינוי', gender: 'male', diet: 'all', unitName: 'צוות אלון' },
     });
     assert.equal(submitted.status, 200, JSON.stringify(submitted.body));
     assert.ok(submitted.body.pending);
@@ -355,7 +360,7 @@ describe('API מקצה לקצה', () => {
     // חזרה לערכים המקוריים - הבקשה נעלמת בלי לחכות לאישור.
     const reverted = await api('POST', '/api/users/me/profile-edit', {
       token: teamLeaderToken,
-      body: { firstName: 'עומר', lastName: 'כהן', gender: 'male', diet: 'all', unitName: 'צוות אלון' },
+      body: { phone: '0501234567', firstName: 'עומר', lastName: 'כהן', gender: 'male', diet: 'all', unitName: 'צוות אלון' },
     });
     assert.equal(reverted.status, 200);
     assert.equal(reverted.body.pending, null);
@@ -369,7 +374,7 @@ describe('API מקצה לקצה', () => {
 
     const submitted = await api('POST', '/api/users/me/profile-edit', {
       token: soldierToken,
-      body: { firstName: 'איתי-זמני', lastName: 'דהן', gender: 'male', diet: 'vegetarian' },
+      body: { phone: '0501234567', firstName: 'איתי-זמני', lastName: 'דהן', gender: 'male', diet: 'vegetarian' },
     });
     assert.equal(submitted.status, 200);
     assert.ok(submitted.body.pending);
@@ -405,7 +410,7 @@ describe('API מקצה לקצה', () => {
     // החייל מגיש בקשת עדכון עצמאית לפני שהמפקד עורך ישירות.
     const ownRequest = await api('POST', '/api/users/me/profile-edit', {
       token: soldierToken,
-      body: { firstName: 'נועם', lastName: 'פרץ', gender: 'male', diet: 'vegan' },
+      body: { phone: '0501234567', firstName: 'נועם', lastName: 'פרץ', gender: 'male', diet: 'vegan' },
     });
     assert.equal(ownRequest.status, 200);
     assert.ok(ownRequest.body.pending);
@@ -413,14 +418,14 @@ describe('API מקצה לקצה', () => {
     // מי שאינו בשרשרת הפיקוד לא יכול לערוך ישירות.
     const denied = await api('PATCH', `/api/users/${soldierId}/profile`, {
       token: outsiderToken,
-      body: { firstName: 'נועם', lastName: 'פרץ-חדש', gender: 'male', diet: 'all' },
+      body: { phone: '0501234567', firstName: 'נועם', lastName: 'פרץ-חדש', gender: 'male', diet: 'all' },
     });
     assert.equal(denied.status, 403);
 
     // המפקד עורך ישירות - חל מיד, בלי אישור נוסף.
     const edited = await api('PATCH', `/api/users/${soldierId}/profile`, {
       token: teamLeaderToken,
-      body: { firstName: 'נועם', lastName: 'פרץ-חדש', gender: 'male', diet: 'all' },
+      body: { phone: '0501234567', firstName: 'נועם', lastName: 'פרץ-חדש', gender: 'male', diet: 'all' },
     });
     assert.equal(edited.status, 200, JSON.stringify(edited.body));
     assert.equal(edited.body.user.lastName, 'פרץ-חדש');
@@ -433,7 +438,7 @@ describe('API מקצה לקצה', () => {
     // מפקד אינו יכול לערוך את עצמו דרך הנתיב הזה - זה עובר דרך /me/profile-edit.
     const selfEdit = await api('PATCH', `/api/users/${teamLeaderId}/profile`, {
       token: teamLeaderToken,
-      body: { firstName: 'עומר', lastName: 'כהן', gender: 'male', diet: 'all', unitName: 'צוות אלון' },
+      body: { phone: '0501234567', firstName: 'עומר', lastName: 'כהן', gender: 'male', diet: 'all', unitName: 'צוות אלון' },
     });
     assert.equal(selfEdit.status, 400);
 
@@ -441,7 +446,7 @@ describe('API מקצה לקצה', () => {
     const divisionToken = await login('1000002');
     const missingUnit = await api('PATCH', `/api/users/${sectorId}/profile`, {
       token: divisionToken,
-      body: { firstName: 'דנה', lastName: 'לוי', gender: 'female', diet: 'all' },
+      body: { phone: '0501234567', firstName: 'דנה', lastName: 'לוי', gender: 'female', diet: 'all' },
     });
     assert.equal(missingUnit.status, 400);
     assert.match(missingUnit.body.error, /שם יחידה/);
@@ -541,6 +546,7 @@ describe('API מקצה לקצה', () => {
 
     const registered = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '2000090',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -572,6 +578,7 @@ describe('API מקצה לקצה', () => {
     // הרשמה עם שותף שאינו חוקי נדחית, ולא נוצר משתמש חלקי.
     const invalid = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '2000091',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -722,6 +729,7 @@ describe('API מקצה לקצה', () => {
     // ר״צ שמנסה להירשם תחת רת״ח במקום רמ״ד.
     const underDivision = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3100002',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -746,6 +754,7 @@ describe('API מקצה לקצה', () => {
     ] as const) {
       const response = await api('POST', '/api/auth/register', {
         body: {
+          phone: '0501234567',
           companyId,
           password: 'Test1234',
           confirmPassword: 'Test1234',
@@ -768,6 +777,7 @@ describe('API מקצה לקצה', () => {
     ] as const) {
       const created = await api('POST', '/api/auth/register', {
         body: {
+          phone: '0501234567',
           companyId,
           password: 'Test1234',
           confirmPassword: 'Test1234',
@@ -790,6 +800,7 @@ describe('API מקצה לקצה', () => {
     // רת״ח שבוחר מפקד שאינו מפמ״ר נדחה.
     const withManager = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3200001',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -808,6 +819,7 @@ describe('API מקצה לקצה', () => {
     // בלי מפקד - נרשם בהצלחה, כי אין עדיין מפמ״ר מאושר במערכת.
     const created = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3200002',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -839,6 +851,7 @@ describe('API מקצה לקצה', () => {
     // מפקד רגיל אינו יכול לאשר רישום של ראש שרשרת שאינו כפוף לו.
     const other = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3200003',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -865,6 +878,7 @@ describe('API מקצה לקצה', () => {
     // המפמ״ר הוא ראש השרשרת ולכן אינו בוחר מפקד.
     const withManager = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3400001',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -882,6 +896,7 @@ describe('API מקצה לקצה', () => {
 
     const created = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3400002',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -923,6 +938,7 @@ describe('API מקצה לקצה', () => {
 
     const underCeo = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '3400003',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -1671,6 +1687,7 @@ describe('API מקצה לקצה', () => {
     // המקרה שחתימות הזמן ברזולוציית מילישנייה (NOW_MS) אמורות לתפוס.
     const registration = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '2000020',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -1735,6 +1752,7 @@ describe('API מקצה לקצה', () => {
     // עוד חייל שאושר אחרי ההגשה - עליו נבדוק את החסימה.
     const registration = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '2000021',
         password: 'Test1234',
         confirmPassword: 'Test1234',
@@ -3502,6 +3520,7 @@ describe('אימות בסיסמה', () => {
   test('הרשמה דוחה סיסמה חלשה מדי, וסיסמאות שאינן תואמות', async () => {
     const weak = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '6500001',
         password: 'short',
         confirmPassword: 'short',
@@ -3518,6 +3537,7 @@ describe('אימות בסיסמה', () => {
 
     const mismatch = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '6500002',
         password: 'Passw0rd1',
         confirmPassword: 'Passw0rd2',
@@ -3536,6 +3556,7 @@ describe('אימות בסיסמה', () => {
   test('התחברות בשני שלבים: בדיקת מספר אישי לא מחזירה טוקן, וסיסמה נכונה/שגויה מטופלות נכון', async () => {
     const registered = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '6500003',
         password: 'Passw0rd1',
         confirmPassword: 'Passw0rd1',
@@ -3573,6 +3594,7 @@ describe('אימות בסיסמה', () => {
   test('נעילה זמנית אחרי יותר מדי נסיונות התחברות כושלים', async () => {
     const registered = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '6500004',
         password: 'Passw0rd1',
         confirmPassword: 'Passw0rd1',
@@ -3608,6 +3630,7 @@ describe('אימות בסיסמה', () => {
   test('שכחתי סיסמה: התשובה זהה למספר קיים ולא קיים, והאופרטיבי בלבד מטפל בבקשות', async () => {
     const registered = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '6500005',
         password: 'Passw0rd1',
         confirmPassword: 'Passw0rd1',
@@ -3689,6 +3712,7 @@ describe('אימות בסיסמה', () => {
   test('התעלמות מבקשת איפוס לא משנה את הסיסמה הקיימת', async () => {
     const registered = await api('POST', '/api/auth/register', {
       body: {
+        phone: '0501234567',
         companyId: '6500006',
         password: 'Passw0rd1',
         confirmPassword: 'Passw0rd1',
