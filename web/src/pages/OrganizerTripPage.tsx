@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   api,
   type BusListResponse,
   type DormPlanResponse,
   type Gender,
+  type KmbatzLeaderOption,
+  type KmbatzSoldierOption,
   type ParticipantsResponse,
   type SigningLeaderOption,
   type Structure,
@@ -67,6 +69,8 @@ export function OrganizerTripPage() {
       </div>
 
       <LaunchedPanel trip={data} onChanged={() => void trip.reload()} />
+      <LeadersCard trip={data} onChanged={() => void trip.reload()} />
+      <KmbatzCard trip={data} onChanged={() => void trip.reload()} />
       <SubmitTripPanel trip={data} onChanged={() => void trip.reload()} />
 
       <div className="tabs">
@@ -471,6 +475,145 @@ function LeadersCard({ trip, onChanged }: { trip: Trip; onChanged: () => void })
   );
 }
 
+// --- קמב״צים ----------------------------------------------------------------
+
+/**
+ * מינוי קמב״צים: חיילים בודדים שהאופרטיבי בוחר, וכל אחד מקבל הרשאת שיבוץ
+ * שקולה לרת״ח שנבחר עבורו - יכול לשבץ את כל היחידה של אותו רת״ח, בדיוק כאילו
+ * הוא עצמו קיבל את משימת השיבוץ (ראו ההסבר ב-lib/signing.ts).
+ */
+function KmbatzCard({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
+  const options = useApi<{ soldiers: KmbatzSoldierOption[]; leaders: KmbatzLeaderOption[] }>(
+    '/trips/kmbatz-candidates',
+  );
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [soldierId, setSoldierId] = useState('');
+  const [leaderId, setLeaderId] = useState('');
+  const [search, setSearch] = useState('');
+
+  const locked = trip.busesLocked || trip.dormsLocked;
+  const currentIds = new Set(trip.kmbatzim.map((entry) => entry.userId));
+  const availableSoldiers = (options.data?.soldiers ?? []).filter((soldier) => !currentIds.has(soldier.id));
+  const filteredSoldiers = useMemo(() => {
+    const term = search.trim();
+    if (!term) return availableSoldiers;
+    return availableSoldiers.filter(
+      (soldier) =>
+        soldier.fullName.includes(term) ||
+        soldier.companyId.includes(term) ||
+        (soldier.unitName ?? '').includes(term),
+    );
+  }, [availableSoldiers, search]);
+  const leaders = options.data?.leaders ?? [];
+
+  const assign = async () => {
+    if (!soldierId || !leaderId) return;
+    setError('');
+    setBusy(true);
+    try {
+      await api.post(`/trips/${trip.id}/kmbatzim`, { userId: Number(soldierId), leaderId: Number(leaderId) });
+      setSoldierId('');
+      setLeaderId('');
+      setSearch('');
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught, 'מינוי הקמב״ץ נכשל'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (userId: number) => {
+    setError('');
+    setBusy(true);
+    try {
+      await api.delete(`/trips/${trip.id}/kmbatzim/${userId}`);
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught, 'הסרת הקמב״ץ נכשלה'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title={`בחר קמב״צים (${trip.kmbatzim.length})`} defaultCollapsed>
+      <Alert kind="error">{error}</Alert>
+      <p className="small muted">
+        חייל שנבחר כאן מקבל הרשאת שיבוץ שקולה לרת״ח שנבחר בשבילו - יכול לשבץ את כל מי שכפוף לאותו רת״ח, בדיוק
+        כמוהו.
+      </p>
+      {locked && <Alert kind="warn">אי אפשר לשנות קמב״צים אחרי נעילת האוטובוסים או הלינה.</Alert>}
+
+      <ul className="name-list">
+        {trip.kmbatzim.map((entry) => (
+          <li key={entry.userId}>
+            <span>
+              {entry.fullName}
+              <span className="muted small">
+                {` · ${entry.companyId}`}
+                {' · בשם '}
+                {entry.leaderFullName}
+                {entry.unitName ? ` · ${entry.unitName}` : ''}
+                {` · ${entry.signedCount} שובצו`}
+              </span>
+            </span>
+            {!locked && (
+              <button
+                type="button"
+                className="btn btn--sm btn--danger"
+                disabled={busy}
+                onClick={() => void remove(entry.userId)}
+              >
+                הסרה
+              </button>
+            )}
+          </li>
+        ))}
+        {trip.kmbatzim.length === 0 && <li className="muted">לא מונו קמב״צים</li>}
+      </ul>
+
+      {!locked && (
+        <div className="field-row" style={{ marginTop: '0.75rem' }}>
+          <Field label="חיפוש חייל" hint="לפי שם או מספר אישי">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="שם, מספר אישי או יחידה"
+            />
+          </Field>
+          <Field label="חייל" hint={`מי יקבל את הרשאת השיבוץ (${filteredSoldiers.length} תוצאות)`}>
+            <select value={soldierId} onChange={(event) => setSoldierId(event.target.value)}>
+              <option value="">בחר חייל...</option>
+              {filteredSoldiers.map((soldier) => (
+                <option key={soldier.id} value={soldier.id}>
+                  {soldier.fullName} · {soldier.companyId}
+                  {soldier.unitName ? ` · ${soldier.unitName}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="בשם הרת״ח" hint="מי הסמכות מושאלת ממנו">
+            <select value={leaderId} onChange={(event) => setLeaderId(event.target.value)}>
+              <option value="">בחר רת״ח...</option>
+              {leaders.map((leader) => (
+                <option key={leader.id} value={leader.id}>
+                  {leader.fullName}
+                  {leader.unitName ? ` · ${leader.unitName}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <button type="button" className="btn btn--sm" disabled={busy || !soldierId || !leaderId} onClick={() => void assign()}>
+            מינוי
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // --- פעימות יציאה ---------------------------------------------------------
 
 function CyclesTab({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
@@ -515,8 +658,6 @@ function CyclesTab({ trip, onChanged }: { trip: Trip; onChanged: () => void }) {
           ההגשה מחדש.
         </Alert>
       )}
-
-      <LeadersCard trip={trip} onChanged={onChanged} />
 
       <Card title={`פעימות יציאה (${trip.cycles.length})`}>
         <form onSubmit={add} className="stack" style={{ marginBottom: '1rem' }}>

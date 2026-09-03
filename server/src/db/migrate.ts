@@ -317,4 +317,19 @@ export function migrate(db: Db): void {
     db.exec('ALTER TABLE shift_reports ADD COLUMN handling_status TEXT');
     console.log('[migrate] shift_reports.duty_type/duty_location/duty_dates/handling_status נוספו');
   }
+
+  // קמב״צים: חיילים בודדים עם הרשאת שיבוץ שקולה לרת״ח שנבחר - ראו ההסבר ב-schema.sql.
+  if (!tableExists(db, 'trip_kmbatz')) {
+    db.exec(`CREATE TABLE trip_kmbatz (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id    INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      leader_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (trip_id, user_id)
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trip_kmbatz_trip ON trip_kmbatz(trip_id)');
+    console.log('[migrate] trip_kmbatz נוצרה');
+  }
 }

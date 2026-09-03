@@ -444,8 +444,8 @@ function NotSignedUpView({ trip }: { trip: Trip }) {
       <Card title="מה עושים?">
         <div className="stack">
           <p className="small">
-            {user.isManager
-              ? 'המפקד שמעליך משבץ אותך. אם קיבלת את משימת השיבוץ בגלישה, אפשר לשבץ את עצמך ואת האנשים שלך במסך שיבוץ האנשים.'
+            {user.isManager || trip.signingAuthority
+              ? 'המפקד שמעליך משבץ אותך. אם קיבלת את משימת השיבוץ בגלישה (או מונית קמב״ץ), אפשר לשבץ את עצמך ואת האנשים שלך במסך שיבוץ האנשים.'
               : `אם אתה צריך להשתתף בגלישה, יש לפנות ל${user.managerName ?? 'מפקד שלך'} כדי שישבץ אותך.`}
           </p>
           {user.managerName && !user.isManager && (

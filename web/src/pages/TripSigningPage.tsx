@@ -44,6 +44,7 @@ export function TripSigningPage() {
   const data = trip.data?.trip;
   const people = signable.data?.people ?? [];
   const authority = signable.data?.authority ?? null;
+  const kmbatzOf = signable.data?.kmbatzOf ?? null;
 
   const unsigned = useMemo(() => people.filter((person) => person.signup == null), [people]);
   const signed = useMemo(() => people.filter((person) => person.signup != null), [people]);
@@ -170,6 +171,7 @@ export function TripSigningPage() {
           <p>
             {data.stateLabel}
             {authority === 'delegated' && ' · השיבוץ שלך ממתין לאישור המפקד שמעליך'}
+            {kmbatzOf && ` · אתה קמב״ץ - משבץ בהרשאה שקולה ל${kmbatzOf}`}
           </p>
         </div>
         <div className="row">

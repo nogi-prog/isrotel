@@ -176,7 +176,7 @@ export function CreateTripPage() {
           </div>
         </Card>
 
-        <Card title={`מפקדים שישבצו את האנשים שלהם (${selected.length} נבחרו)`}>
+        <Card title={`מפקדים שישבצו את האנשים שלהם (${selected.length} נבחרו)`} defaultCollapsed>
           <div className="field-row">
             <Field label="חיפוש מפקד">
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="שם או יחידה" />

@@ -22,6 +22,7 @@ import {
   hasDelegated,
   hasSubmitted,
   isSigningLeader,
+  kmbatzLeaderId,
   lateAdditionIds,
   responsibleLeaderId,
   rosterClosedNote,
@@ -374,8 +375,19 @@ signupsRouter.get('/:id/signable', (req, res) => {
         })()
       : null;
 
+  // קמב״ץ: חייל שקיבל הרשאה שקולה לרת״ח שהוקצה לו - להצגת "אתה משבץ בשם X".
+  const kmbatzLeader =
+    manager.role === 'employee'
+      ? (() => {
+          const leaderId = kmbatzLeaderId(trip.id, manager.id);
+          const leader = leaderId != null ? getUser(db, leaderId) : null;
+          return leader ? fullName(leader) : null;
+        })()
+      : null;
+
   res.json({
     authority,
+    kmbatzOf: kmbatzLeader,
     hasDelegated: isSigningLeader(manager.role) ? hasDelegated(trip.id, manager.id) : false,
     subordinateRoleLabel,
     // ההגשה של המפקד עצמו, ומי שנוסף ליחידה שלו אחריה וטרם שובץ.

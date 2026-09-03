@@ -3533,6 +3533,147 @@ describe('API מקצה לקצה', () => {
   });
 });
 
+describe('קמב״צים - הרשאת שיבוץ שקולה לרת״ח שנבחר', () => {
+  // תפקידי 'to' ו-'ceo' הם ייחודיים בכל המסד (idx_users_singleton_ceo_to) -
+  // האופרטיבי כבר נוצר ב-describe הראשי (companyId 1000001), ולכן משתמשים בו.
+  let divisionId = 0; // רת״ח שממנו מושאלת הסמכות
+  let sectorId = 0;
+  let soldierUnderDivisionId = 0; // כפוף לרת״ח - הקמב״ץ אמור להיות רשאי לשבץ אותו
+  let kmbatzId = 0; // חייל רגיל, לא כפוף לרת״ח כלל - ימונה לקמב״ץ
+  let outsiderId = 0; // כפוף לרת״ח אחר - מחוץ לתחום שהוקצה לקמב״ץ
+
+  before(() => {
+    divisionId = seedUser({
+      companyId: '9100001',
+      firstName: 'אבי',
+      lastName: 'שגב',
+      gender: 'male',
+      role: 'division_leader',
+      unitName: 'תחום א',
+    });
+    sectorId = seedUser({
+      companyId: '9100002',
+      firstName: 'דנה',
+      lastName: 'לוי',
+      gender: 'female',
+      role: 'sector_leader',
+      managerId: divisionId,
+      unitName: 'מדור א',
+    });
+    soldierUnderDivisionId = seedUser({
+      companyId: '9100003',
+      firstName: 'יונתן',
+      lastName: 'ברק',
+      gender: 'male',
+      role: 'employee',
+      managerId: sectorId,
+    });
+    kmbatzId = seedUser({ companyId: '9100004', firstName: 'נועה', lastName: 'כהן', gender: 'female', role: 'employee' });
+    const otherDivisionId = seedUser({
+      companyId: '9100005',
+      firstName: 'רון',
+      lastName: 'פרץ',
+      gender: 'male',
+      role: 'division_leader',
+      unitName: 'תחום ב',
+    });
+    outsiderId = seedUser({
+      companyId: '9100006',
+      firstName: 'עידן',
+      lastName: 'מזרחי',
+      gender: 'male',
+      role: 'employee',
+      managerId: otherDivisionId,
+    });
+  });
+
+  test('אופרטיבי ממנה חייל לקמב״ץ, והוא מקבל הרשאת שיבוץ מלאה על תחום הרת״ח שנבחר בלבד', async () => {
+    const toToken = await login('1000001');
+    const kmbatzToken = await login('9100004');
+
+    const created = await api('POST', '/api/trips', {
+      token: toToken,
+      body: { name: 'גלישת קמב״צים', leaderIds: [divisionId], cycles: [{ exitDate: '2027-01-10' }] },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const tripId = created.body.trip.id;
+    const cycleId = created.body.trip.cycles[0].id;
+    assert.deepEqual(created.body.trip.kmbatzim, []);
+
+    // לפני המינוי - חייל רגיל לעולם אינו משבץ.
+    const beforeAssign = await api('GET', `/api/trips/${tripId}/signable`, { token: kmbatzToken });
+    assert.equal(beforeAssign.body.authority, null);
+
+    // רק אופרטיבי יכול למנות קמב״ץ.
+    const deniedAssign = await api('POST', `/api/trips/${tripId}/kmbatzim`, {
+      token: kmbatzToken,
+      body: { userId: kmbatzId, leaderId: divisionId },
+    });
+    assert.equal(deniedAssign.status, 403);
+
+    // אפשר למנות לקמב״ץ רק חייל (role='employee') - לא רמ״ד.
+    const badSoldier = await api('POST', `/api/trips/${tripId}/kmbatzim`, {
+      token: toToken,
+      body: { userId: sectorId, leaderId: divisionId },
+    });
+    assert.equal(badSoldier.status, 400);
+
+    // אפשר להשאיל את הסמכות רק מרת״ח - לא מרמ״ד.
+    const badLeader = await api('POST', `/api/trips/${tripId}/kmbatzim`, {
+      token: toToken,
+      body: { userId: kmbatzId, leaderId: sectorId },
+    });
+    assert.equal(badLeader.status, 400);
+
+    // מינוי תקין.
+    const assigned = await api('POST', `/api/trips/${tripId}/kmbatzim`, {
+      token: toToken,
+      body: { userId: kmbatzId, leaderId: divisionId },
+    });
+    assert.equal(assigned.status, 201, JSON.stringify(assigned.body));
+    assert.equal(assigned.body.trip.kmbatzim.length, 1);
+    assert.equal(assigned.body.trip.kmbatzim[0].userId, kmbatzId);
+    assert.equal(assigned.body.trip.kmbatzim[0].leaderId, divisionId);
+
+    // עכשיו יש הרשאת 'leader' מלאה - כמו רת״ח, על כל מי שכפוף לרת״ח שהוקצה (כולל הוא עצמו).
+    const signable = await api('GET', `/api/trips/${tripId}/signable`, { token: kmbatzToken });
+    assert.equal(signable.body.authority, 'leader');
+    assert.equal(signable.body.kmbatzOf, 'אבי שגב');
+    const peopleIds = signable.body.people.map((person: any) => person.userId).sort((a: number, b: number) => a - b);
+    assert.deepEqual(peopleIds, [divisionId, sectorId, soldierUnderDivisionId].sort((a, b) => a - b));
+
+    // משבץ מישהו מתחום הרת״ח - נכנס מיד כ-'approved', בדיוק כמו רת״ח שמשבץ בעצמו.
+    const signup = await api('POST', `/api/trips/${tripId}/signups`, {
+      token: kmbatzToken,
+      body: { cycleId, userIds: [soldierUnderDivisionId] },
+    });
+    assert.equal(signup.status, 201, JSON.stringify(signup.body));
+    assert.equal(signup.body.status, 'approved');
+    assert.equal(signup.body.added, 1);
+
+    // אינו רשאי לשבץ מישהו מחוץ לתחום שהוקצה לו.
+    const forbiddenSignup = await api('POST', `/api/trips/${tripId}/signups`, {
+      token: kmbatzToken,
+      body: { cycleId, userIds: [outsiderId] },
+    });
+    assert.equal(forbiddenSignup.status, 403);
+
+    // הסרת הקמב״ץ - אופרטיבי בלבד.
+    const deniedRemove = await api('DELETE', `/api/trips/${tripId}/kmbatzim/${kmbatzId}`, { token: kmbatzToken });
+    assert.equal(deniedRemove.status, 403);
+
+    const removed = await api('DELETE', `/api/trips/${tripId}/kmbatzim/${kmbatzId}`, { token: toToken });
+    assert.equal(removed.status, 200, JSON.stringify(removed.body));
+    assert.deepEqual(removed.body.trip.kmbatzim, []);
+
+    // אחרי ההסרה - שוב אין הרשאת שיבוץ.
+    const afterRemoval = await api('GET', `/api/trips/${tripId}/signable`, { token: kmbatzToken });
+    assert.equal(afterRemoval.body.authority, null);
+
+    db.prepare('DELETE FROM trips WHERE id = ?').run(tripId);
+  });
+});
+
 describe('אימות בסיסמה', () => {
   let opId = 0;
   let leaderId = 0;

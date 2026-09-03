@@ -237,6 +237,34 @@ export interface SigningLeaderOption {
   directReports: number;
 }
 
+/** קמב״ץ פעיל בגלישה: חייל שקיבל הרשאת שיבוץ שקולה לרת״ח שהוקצה לו. */
+export interface TripKmbatz {
+  userId: number;
+  fullName: string;
+  companyId: string;
+  unitName: string | null;
+  leaderId: number;
+  leaderFullName: string;
+  /** כמה כבר שובצו מהיחידה של הרת״ח שהוקצה. */
+  signedCount: number;
+}
+
+/** חייל שאפשר למנות לקמב״ץ. */
+export interface KmbatzSoldierOption {
+  id: number;
+  fullName: string;
+  companyId: string;
+  unitName: string | null;
+}
+
+/** רת״ח שאפשר "להשאיל" ממנו את הסמכות לקמב״ץ. */
+export interface KmbatzLeaderOption {
+  id: number;
+  fullName: string;
+  unitName: string | null;
+  directReports: number;
+}
+
 export interface Trip {
   id: number;
   /** נוצר אוטומטית: "גלישה #1". */
@@ -246,6 +274,7 @@ export interface Trip {
   launchDate: string;
   busCapacity: number;
   leaders: TripLeader[];
+  kmbatzim: TripKmbatz[];
   leadersNotified: boolean;
   leadersNotifiedAt: string | null;
   busesLocked: boolean;
@@ -302,6 +331,8 @@ export interface SignablePerson {
 
 export interface SignableResponse {
   authority: SigningAuthority;
+  /** קמב״ץ בלבד: שם הרת״ח שממנו הושאלה הסמכות, או null אם המפקד אינו קמב״ץ. */
+  kmbatzOf: string | null;
   hasDelegated: boolean;
   /**
    * שם התפקיד (ברבים) שהמפקד יכול להאציל אליו - הכפיפים הישירים שלו שהם

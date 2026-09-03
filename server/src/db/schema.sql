@@ -260,6 +260,24 @@ CREATE TABLE IF NOT EXISTS trip_delegations (
   UNIQUE (trip_id, manager_id)
 );
 
+-- קמב״צים: חיילים בודדים שהאופרטיבי בוחר לתת להם הרשאת שיבוץ שקולה לרת״ח --
+-- מפקדי תחום (רת״ח) הם היחידים שיש להם כפיפים מספיק רחב כדי "להשאיל" את
+-- הסמכות הזאת. חייל שנבחר משבץ בדיוק את מי שהרת״ח שנבחר עבורו (leader_id)
+-- רשאי לשבץ - עצמו וכל הכפופים לו - בדיוק כמו רת״ח שקיבל את משימת השיבוץ
+-- ('leader', לא 'delegated') - ראו effectiveSigningRootId ב-lib/signing.ts.
+-- שורה אחת לכל (גלישה, חייל); leader_id יכול להתחלף בלי למחוק ולהוסיף מחדש.
+CREATE TABLE IF NOT EXISTS trip_kmbatz (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  trip_id    INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  leader_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (trip_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trip_kmbatz_trip ON trip_kmbatz(trip_id);
+
 -- העדפות שותפים לחדר (עד 3) ------------------------------------------------
 CREATE TABLE IF NOT EXISTS dorm_preferences (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,

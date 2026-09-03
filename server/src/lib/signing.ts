@@ -53,6 +53,37 @@ export function isAssignedLeader(tripId: number, managerId: number): boolean {
   return row != null;
 }
 
+/**
+ * קמב״צ: חייל בודד שהאופרטיבי בחר לו רת״ח "להשאיל" ממנו את הסמכות - ראו
+ * ההסבר ב-schema.sql ליד trip_kmbatz. מחזיר את מזהה הרת״ח שהוקצה לו בגלישה
+ * הזאת, או null אם החייל אינו קמב״ץ בגלישה הזאת.
+ */
+export function kmbatzLeaderId(tripId: number, userId: number): number | null {
+  const row = db
+    .prepare('SELECT leader_id FROM trip_kmbatz WHERE trip_id = ? AND user_id = ?')
+    .get(tripId, userId) as { leader_id: number } | undefined;
+  return row?.leader_id ?? null;
+}
+
+/** כל החיילים שמונו כקמב״צים בגלישה. */
+export function kmbatzUserIds(tripId: number): number[] {
+  return (
+    db.prepare('SELECT user_id FROM trip_kmbatz WHERE trip_id = ? ORDER BY user_id').all(tripId) as Array<{
+      user_id: number;
+    }>
+  ).map((row) => row.user_id);
+}
+
+/**
+ * שורש השיבוץ בפועל: עצמו, חוץ מקמב״ץ - שם זה הרת״ח שהוקצה לו, כי לחייל
+ * עצמו אין כפיפים משלו. משמש גם ב-signableUserIds וגם ב-assertCanSign, כדי
+ * ששני המקומות יסכימו בדיוק על מי הקמב״ץ רשאי לשבץ.
+ */
+function effectiveSigningRootId(tripId: number, user: UserRow): number {
+  if (user.role === 'employee') return kmbatzLeaderId(tripId, user.id) ?? user.id;
+  return user.id;
+}
+
 /** המפקדים שקיבלו את משימת השיבוץ בגלישה. */
 export function assignedLeaderIds(tripId: number): number[] {
   return (
@@ -95,7 +126,7 @@ export function signingManagerIds(tripId: number): number[] {
       .all(tripId, ...MANAGER_ROLES) as Array<{ id: number }>
   ).map((row) => row.id);
 
-  return [...new Set([...assignedLeaderIds(tripId), ...delegates])];
+  return [...new Set([...assignedLeaderIds(tripId), ...delegates, ...kmbatzUserIds(tripId)])];
 }
 
 /**
@@ -107,7 +138,10 @@ export function signingManagerIds(tripId: number): number[] {
  * מקבל את משימת השיבוץ הוא משבץ את המדור שלו בדיוק כמו רמ״ד.
  */
 export function signingAuthority(trip: TripRow, user: UserRow): 'leader' | 'delegated' | null {
-  if (user.role === 'employee') return null;
+  if (user.role === 'employee') {
+    // חייל רגיל לעולם אינו משבץ - חוץ מקמב״ץ, שקיבל הרשאה שקולה לרת״ח שהוקצה לו.
+    return kmbatzLeaderId(trip.id, user.id) != null ? 'leader' : null;
+  }
   if (isAssignedLeader(trip.id, user.id)) return 'leader';
 
   // אחרת - רק אם מפקד בשרשרת שמעליו האציל את השיבוץ בגלישה הזאת.
@@ -129,6 +163,7 @@ export function responsibleLeaderId(tripId: number, userId: number): number | nu
 export function signableUserIds(trip: TripRow, user: UserRow): number[] {
   if (signingAuthority(trip, user) == null) return [];
 
+  const rootId = effectiveSigningRootId(trip.id, user);
   const rows = db
     .prepare(
       `WITH RECURSIVE sub(id, depth) AS (
@@ -142,7 +177,7 @@ export function signableUserIds(trip: TripRow, user: UserRow): number[] {
          FROM sub JOIN users ON users.id = sub.id
         WHERE users.status = 'approved'`,
     )
-    .all(user.id) as Array<{ id: number }>;
+    .all(rootId) as Array<{ id: number }>;
 
   return rows.map((row) => row.id);
 }
@@ -164,7 +199,8 @@ export function assertSigningAuthority(trip: TripRow, user: UserRow): 'leader' |
 export function assertCanSign(trip: TripRow, user: UserRow, targetId: number): 'leader' | 'delegated' {
   const authority = assertSigningAuthority(trip, user);
 
-  if (targetId !== user.id && !isAncestorOf(db, user.id, targetId)) {
+  const rootId = effectiveSigningRootId(trip.id, user);
+  if (targetId !== rootId && !isAncestorOf(db, rootId, targetId)) {
     throw forbidden('האדם הזה אינו כפוף לך');
   }
   return authority;
@@ -291,7 +327,7 @@ export function notifyLateAddition(target: UserRow): void {
   if (trips.length === 0) return;
 
   const ancestors = chainUp(db, target.id).slice(1);
-  if (ancestors.length === 0) return;
+  const ancestorAndSelfIds = new Set([target.id, ...ancestors.map((ancestor) => ancestor.id)]);
 
   for (const trip of trips) {
     for (const ancestor of ancestors) {
@@ -302,6 +338,22 @@ export function notifyLateAddition(target: UserRow): void {
         userId: ancestor.id,
         kind: 'late_addition',
         title: `${fullName(target)} נוסף ליחידה שלך אחרי שהגשת`,
+        body: `אפשר להוסיף אותו לרשימת האנשים בגלישה ${trip.name}, כל עוד האופרטיבי לא הגיש את הגלישה.`,
+        link: `/trips/${trip.id}/signing`,
+      });
+    }
+
+    // קמב״צים שהוקצו לרת״ח שנמצא בשרשרת של האדם החדש (או שהוקצו אליו עצמו) -
+    // בדיוק כמו רת״ח רגיל, יש להם עכשיו אדם חדש שהם רשאים להוסיף.
+    for (const kmbatzUserId of kmbatzUserIds(trip.id)) {
+      const leaderId = kmbatzLeaderId(trip.id, kmbatzUserId);
+      if (leaderId == null || !ancestorAndSelfIds.has(leaderId)) continue;
+      if (!hasSubmitted(trip.id, kmbatzUserId)) continue;
+
+      notify(db, {
+        userId: kmbatzUserId,
+        kind: 'late_addition',
+        title: `${fullName(target)} נוסף ליחידה שאתה קמב״ץ שלה`,
         body: `אפשר להוסיף אותו לרשימת האנשים בגלישה ${trip.name}, כל עוד האופרטיבי לא הגיש את הגלישה.`,
         link: `/trips/${trip.id}/signing`,
       });

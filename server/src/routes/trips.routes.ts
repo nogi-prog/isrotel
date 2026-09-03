@@ -16,7 +16,7 @@ import {
   submittedManagerIds,
 } from '../lib/signing.ts';
 import { fullName, getUser } from '../lib/org.ts';
-import { notifyMany } from '../lib/notify.ts';
+import { notify, notifyMany } from '../lib/notify.ts';
 import {
   DEFAULT_BUS_CAPACITY,
   SIGNING_LEADER_ROLES,
@@ -148,6 +148,39 @@ function serializeTrip(trip: TripRow, userId: number) {
     signedCount: leaderSignedCount(trip.id, row.id),
   }));
 
+  // קמב״צים: חיילים בודדים שקיבלו הרשאת שיבוץ שקולה לרת״ח שהוקצה להם - ראו
+  // ההסבר ב-schema.sql ליד trip_kmbatz וב-lib/signing.ts.
+  const kmbatzim = (
+    db
+      .prepare(
+        `SELECT k.user_id, u.first_name, u.last_name, u.unit_name, u.company_id,
+                k.leader_id, lu.first_name AS leader_first, lu.last_name AS leader_last
+           FROM trip_kmbatz k
+           JOIN users u ON u.id = k.user_id
+           JOIN users lu ON lu.id = k.leader_id
+          WHERE k.trip_id = ?
+          ORDER BY u.last_name, u.first_name`,
+      )
+      .all(trip.id) as Array<{
+      user_id: number;
+      first_name: string;
+      last_name: string;
+      unit_name: string | null;
+      company_id: string;
+      leader_id: number;
+      leader_first: string;
+      leader_last: string;
+    }>
+  ).map((row) => ({
+    userId: row.user_id,
+    fullName: `${row.first_name} ${row.last_name}`,
+    companyId: row.company_id,
+    unitName: row.unit_name,
+    leaderId: row.leader_id,
+    leaderFullName: `${row.leader_first} ${row.leader_last}`,
+    signedCount: leaderSignedCount(trip.id, row.leader_id),
+  }));
+
   const closedNote = rosterClosedNote(trip);
 
   return {
@@ -158,6 +191,7 @@ function serializeTrip(trip: TripRow, userId: number) {
     launchDate: trip.launch_date,
     busCapacity: trip.bus_capacity,
     leaders,
+    kmbatzim,
     leadersNotified: trip.leaders_notified_at != null,
     leadersNotifiedAt: trip.leaders_notified_at,
     busesLocked: trip.buses_locked_at != null,
@@ -229,6 +263,59 @@ tripsRouter.get('/signing-leaders', requireTO, (_req, res) => {
       id: row.id,
       fullName: `${row.first_name} ${row.last_name}`,
       role: row.role,
+      unitName: row.unit_name,
+      directReports: row.direct_reports,
+    })),
+  });
+});
+
+/**
+ * מועמדים למינוי קמב״ץ: חיילים מאושרים (לבחירה), ורת״חים מאושרים - מהם
+ * "משאילים" את הסמכות (ראו ההסבר ב-schema.sql ליד trip_kmbatz). אופרטיבי
+ * בלבד. חייב להיות רשום לפני `/:id`, אחרת הנתיב ייחשב למזהה גלישה.
+ */
+tripsRouter.get('/kmbatz-candidates', requireTO, (_req, res) => {
+  const soldiers = db
+    .prepare(
+      `SELECT u.id, u.first_name, u.last_name, u.unit_name, u.company_id
+         FROM users u
+        WHERE u.status = 'approved' AND u.role = 'employee'
+        ORDER BY u.last_name, u.first_name`,
+    )
+    .all() as Array<{
+    id: number;
+    first_name: string;
+    last_name: string;
+    unit_name: string | null;
+    company_id: string;
+  }>;
+
+  const leaders = db
+    .prepare(
+      `SELECT u.id, u.first_name, u.last_name, u.unit_name,
+              (SELECT COUNT(*) FROM users s WHERE s.manager_id = u.id AND s.status = 'approved') AS direct_reports
+         FROM users u
+        WHERE u.status = 'approved' AND u.role = 'division_leader'
+        ORDER BY u.unit_name, u.last_name`,
+    )
+    .all() as Array<{
+    id: number;
+    first_name: string;
+    last_name: string;
+    unit_name: string | null;
+    direct_reports: number;
+  }>;
+
+  res.json({
+    soldiers: soldiers.map((row) => ({
+      id: row.id,
+      fullName: `${row.first_name} ${row.last_name}`,
+      companyId: row.company_id,
+      unitName: row.unit_name,
+    })),
+    leaders: leaders.map((row) => ({
+      id: row.id,
+      fullName: `${row.first_name} ${row.last_name}`,
       unitName: row.unit_name,
       directReports: row.direct_reports,
     })),
@@ -557,4 +644,69 @@ tripsRouter.delete('/:id/cycles/:cycleId', requireTO, (req, res) => {
   });
 
   res.json({ trip: serializeTrip(getTripOr404(trip.id), user.id) });
+});
+
+// --- קמב״צים ----------------------------------------------------------------
+// חיילים בודדים שהאופרטיבי בוחר, וכל אחד מקבל הרשאת שיבוץ שקולה לרת״ח שנבחר
+// עבורו - ראו ההסבר המלא ב-schema.sql ליד trip_kmbatz וב-lib/signing.ts.
+
+const kmbatzSchema = z.object({
+  userId: z.number().int().positive(),
+  leaderId: z.number().int().positive('יש לבחור רת״ח שממנו מושאלת הסמכות'),
+});
+
+tripsRouter.post('/:id/kmbatzim', requireTO, (req, res) => {
+  const to = requireUser(req);
+  const trip = getTripOr404(idParam.parse(req.params.id));
+  const parsed = kmbatzSchema.safeParse(req.body);
+  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? 'נתוני הקמב״ץ אינם תקינים');
+  const { userId, leaderId } = parsed.data;
+
+  const soldier = getUser(db, userId);
+  if (!soldier || soldier.status !== 'approved' || soldier.role !== 'employee') {
+    throw badRequest('אפשר למנות לקמב״ץ רק חייל מאושר');
+  }
+  const leader = getUser(db, leaderId);
+  if (!leader || leader.status !== 'approved' || leader.role !== 'division_leader') {
+    throw badRequest('אפשר להשאיל את הסמכות רק מרת״ח מאושר');
+  }
+
+  tx(() => {
+    db.prepare(
+      `INSERT INTO trip_kmbatz (trip_id, user_id, leader_id, created_by) VALUES (?, ?, ?, ?)
+         ON CONFLICT (trip_id, user_id) DO UPDATE SET leader_id = excluded.leader_id, created_by = excluded.created_by`,
+    ).run(trip.id, userId, leaderId, to.id);
+
+    notify(db, {
+      userId,
+      kind: 'kmbatz_assigned',
+      title: `מוניתָ קמב״ץ לגלישה ${trip.name}`,
+      body: `יש לך עכשיו הרשאה לשבץ את כל מי שכפוף ל${fullName(leader)}, בדיוק כמו רת״ח.`,
+      link: `/trips/${trip.id}/signing`,
+    });
+  });
+
+  res.status(201).json({ trip: serializeTrip(getTripOr404(trip.id), to.id) });
+});
+
+tripsRouter.delete('/:id/kmbatzim/:userId', requireTO, (req, res) => {
+  const to = requireUser(req);
+  const trip = getTripOr404(idParam.parse(req.params.id));
+  const userId = idParam.parse(req.params.userId);
+
+  const result = db.prepare('DELETE FROM trip_kmbatz WHERE trip_id = ? AND user_id = ?').run(trip.id, userId);
+  if (result.changes === 0) throw badRequest('החייל הזה אינו קמב״ץ בגלישה הזאת');
+
+  const soldier = getUser(db, userId);
+  if (soldier) {
+    notify(db, {
+      userId,
+      kind: 'kmbatz_removed',
+      title: `הוסרת מתפקיד קמב״ץ בגלישה ${trip.name}`,
+      body: 'הרשאת השיבוץ שהוענקה לך בוטלה.',
+      link: `/trips/${trip.id}`,
+    });
+  }
+
+  res.json({ trip: serializeTrip(getTripOr404(trip.id), to.id) });
 });
